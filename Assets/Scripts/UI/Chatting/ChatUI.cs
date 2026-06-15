@@ -141,11 +141,13 @@ public class ChatUI : MonoBehaviour
         message = message.Trim();
         chatInput.text = "";
 
-        AddMessage("Me", message);
-
         if (NetworkClient.Instance != null)
         {
             NetworkClient.Instance.SendChat(message);
+        }
+        else
+        {
+            AddSystemMessage("서버에 연결되어 있지 않습니다.");
         }
 
         CloseChat();

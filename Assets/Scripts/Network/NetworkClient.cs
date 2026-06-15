@@ -1,5 +1,6 @@
 // 2026-06-12: NetworkClient.cs
 // 서버 접속, 로그인, 패킷 송수신, 플레이어 스폰/이동 동기화 관리
+// 2026-06-16: SendChat() 추가
 
 using System;
 using System.Collections.Concurrent;
@@ -176,7 +177,17 @@ public class NetworkClient : MonoBehaviour
             return;
         }
 
-        Debug.Log("[NETWORK] SendChat not implemented yet. message = " + message);
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return;
+        }
+
+        message = message.Trim();
+
+        Log("[NETWORK] SendChat message = " + message);
+
+        byte[] packet = Protocol.MakeChatPacket(message);
+        SendRaw(packet);
     }
     private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
     {
@@ -368,6 +379,9 @@ public class NetworkClient : MonoBehaviour
                 HandleMove(packet);
                 break;
 
+            case Protocol.PacketType.SC_CHAT:
+                HandleChat(packet);
+                break;
             default:
                 mainThreadActions.Enqueue(() =>
                 {
@@ -497,6 +511,27 @@ public class NetworkClient : MonoBehaviour
 
             pendingMoves[id] = position;
             Debug.LogWarning("[NETWORK] Move target not found. Save pending move. id = " + id);
+        });
+    }
+
+    private void HandleChat(byte[] packet)
+    {
+        int offset = Protocol.HeaderSize;
+
+        uint id = Protocol.ReadUInt(packet, ref offset);
+        string name = Protocol.ReadFixedString(packet, ref offset, Protocol.NameSize);
+        string message = Protocol.ReadFixedString(packet, ref offset, Protocol.ChatSize);
+
+        mainThreadActions.Enqueue(() =>
+        {
+            Log("[NETWORK] Chat packet. id = " + id +
+                ", name = " + name +
+                ", message = " + message);
+
+            if (ChatUI.Instance != null)
+            {
+                ChatUI.Instance.AddMessage(name, message);
+            }
         });
     }
 

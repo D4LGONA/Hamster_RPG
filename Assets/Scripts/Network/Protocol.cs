@@ -1,4 +1,5 @@
 // 2026-06-11: Protocol.cs 파일 제작. C++ 서버 protocol.h와 동일한 패킷 규칙을 사용한다.
+// 2026-06-16: CS_CHAT, SC_CHAT 추가
 
 using System;
 using System.Text;
@@ -10,6 +11,7 @@ public static class Protocol
 
     public const int NameSize = 20;
     public const int HeaderSize = 4;
+    public const int ChatSize = 80;
 
     public enum PacketType : ushort
     {
@@ -17,12 +19,14 @@ public static class Protocol
         CS_LOGIN = 1,
         CS_MOVE,
         CS_LOGOUT,
+        CS_CHAT,
 
         // Server -> Client
         SC_LOGIN_RESULT,
         SC_SPAWN,
         SC_DESPAWN,
-        SC_MOVEOBJECT
+        SC_MOVEOBJECT,
+        SC_CHAT
     }
 
     public static byte[] MakeLoginPacket(string playerName)
@@ -54,6 +58,19 @@ public static class Protocol
 
         int offset = 0;
         WriteHeader(packet, ref offset, PacketType.CS_LOGOUT);
+
+        return packet;
+    }
+
+    public static byte[] MakeChatPacket(string message)
+    {
+        byte[] packet = new byte[HeaderSize + ChatSize];
+
+        int offset = 0;
+
+        WriteUShort(packet, ref offset, (ushort)packet.Length);
+        WriteUShort(packet, ref offset, (ushort)PacketType.CS_CHAT);
+        WriteFixedString(packet, ref offset, message, ChatSize);
 
         return packet;
     }

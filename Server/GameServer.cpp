@@ -279,6 +279,13 @@ void GameServer::ProcessPacket(std::uint32_t playerId, const char* data, int byt
             }
             break;
 
+        case PACKET_TYPE::CS_CHAT:
+            if (packetSize == sizeof(CS_CHAT_PACKET))
+            {
+                ProcessChat(playerId, reinterpret_cast<const CS_CHAT_PACKET*>(packetData));
+            }
+            break;
+
         case PACKET_TYPE::CS_MOVE:
             if (packetSize == sizeof(CS_MOVE_PACKET))
             {
@@ -376,6 +383,45 @@ void GameServer::ProcessMove(std::uint32_t playerId, const CS_MOVE_PACKET* packe
     movePacket.y = packet->y;
 
     BroadcastPacket(&movePacket, movePacket.size, playerId);
+}
+
+void GameServer::ProcessChat(std::uint32_t playerId, const CS_CHAT_PACKET* packet)
+{
+    std::string senderName;
+
+    {
+        std::lock_guard<std::mutex> lock(playersLock);
+
+        auto iter = players.find(playerId);
+
+        if (iter == players.end())
+        {
+            return;
+        }
+
+        senderName = iter->second.GetName();
+    }
+
+    std::string message(packet->message, strnlen_s(packet->message, CHAT_SIZE));
+
+    if (message.empty())
+    {
+        return;
+    }
+
+    SC_CHAT_PACKET chatPacket{};
+    chatPacket.size = sizeof(SC_CHAT_PACKET);
+    chatPacket.type = PACKET_TYPE::SC_CHAT;
+    chatPacket.id = playerId;
+
+    strncpy_s(chatPacket.name, sizeof(chatPacket.name), senderName.c_str(), _TRUNCATE);
+    strncpy_s(chatPacket.message, sizeof(chatPacket.message), message.c_str(), _TRUNCATE);
+
+    BroadcastPacket(&chatPacket, chatPacket.size, 0);
+
+    std::cout << "[CHAT] id = " << playerId
+        << ", name = " << senderName
+        << ", message = " << message << std::endl;
 }
 
 void GameServer::SendPacket(std::uint32_t playerId, const void* packet, int size)
