@@ -168,6 +168,16 @@ public class NetworkClient : MonoBehaviour
         SendRaw(packet);
     }
 
+    public void SendChat(string message)
+    {
+        if (isConnected == false || isLoggedIn == false || stream == null)
+        {
+            Debug.LogWarning("[NETWORK] SendChat blocked. message = " + message);
+            return;
+        }
+
+        Debug.Log("[NETWORK] SendChat not implemented yet. message = " + message);
+    }
     private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
     {
         if (scene.name != gameSceneName)
