@@ -1,7 +1,8 @@
 // 2026-06-11: Protocol.cs 파일 제작. C++ 서버 protocol.h와 동일한 패킷 규칙을 사용한다.
-// 2026-06-16: CS_CHAT, SC_CHAT 추가
+// 2026-06-16: CS_CHAT, SC_CHAT 추가, 문자열 인코딩 UTF-8 적용
 
 using System;
+using System.Collections.Generic;
 using System.Text;
 
 public static class Protocol
@@ -11,22 +12,24 @@ public static class Protocol
 
     public const int NameSize = 20;
     public const int HeaderSize = 4;
-    public const int ChatSize = 80;
+    public const int ChatSize = 256;
+
+    private static readonly Encoding PacketEncoding = new UTF8Encoding(false);
 
     public enum PacketType : ushort
     {
         // Client -> Server
         CS_LOGIN = 1,
-        CS_MOVE,
-        CS_LOGOUT,
-        CS_CHAT,
+        CS_MOVE = 2,
+        CS_LOGOUT = 3,
+        CS_CHAT = 4,
 
         // Server -> Client
-        SC_LOGIN_RESULT,
-        SC_SPAWN,
-        SC_DESPAWN,
-        SC_MOVEOBJECT,
-        SC_CHAT
+        SC_LOGIN_RESULT = 5,
+        SC_SPAWN = 6,
+        SC_DESPAWN = 7,
+        SC_MOVEOBJECT = 8,
+        SC_CHAT = 9
     }
 
     public static byte[] MakeLoginPacket(string playerName)
@@ -67,9 +70,7 @@ public static class Protocol
         byte[] packet = new byte[HeaderSize + ChatSize];
 
         int offset = 0;
-
-        WriteUShort(packet, ref offset, (ushort)packet.Length);
-        WriteUShort(packet, ref offset, (ushort)PacketType.CS_CHAT);
+        WriteHeader(packet, ref offset, PacketType.CS_CHAT);
         WriteFixedString(packet, ref offset, message, ChatSize);
 
         return packet;
@@ -128,7 +129,8 @@ public static class Protocol
             ++length;
         }
 
-        string value = Encoding.ASCII.GetString(buffer, offset, length);
+        string value = PacketEncoding.GetString(buffer, offset, length);
+
         offset += size;
         return value;
     }
@@ -149,11 +151,51 @@ public static class Protocol
 
     private static void WriteFixedString(byte[] buffer, ref int offset, string value, int size)
     {
-        byte[] stringBytes = Encoding.ASCII.GetBytes(value ?? string.Empty);
+        if (value == null)
+        {
+            value = string.Empty;
+        }
 
-        int copySize = Math.Min(stringBytes.Length, size - 1);
-        Buffer.BlockCopy(stringBytes, 0, buffer, offset, copySize);
+        byte[] stringBytes = GetSafeUtf8Bytes(value, size - 1);
+
+        Buffer.BlockCopy(stringBytes, 0, buffer, offset, stringBytes.Length);
+
+        for (int i = stringBytes.Length; i < size; ++i)
+        {
+            buffer[offset + i] = 0;
+        }
 
         offset += size;
+    }
+
+    private static byte[] GetSafeUtf8Bytes(string value, int maxBytes)
+    {
+        List<byte> result = new List<byte>();
+
+        for (int i = 0; i < value.Length; ++i)
+        {
+            string currentChar;
+
+            if (char.IsHighSurrogate(value[i]) && i + 1 < value.Length && char.IsLowSurrogate(value[i + 1]))
+            {
+                currentChar = value.Substring(i, 2);
+                ++i;
+            }
+            else
+            {
+                currentChar = value[i].ToString();
+            }
+
+            byte[] charBytes = PacketEncoding.GetBytes(currentChar);
+
+            if (result.Count + charBytes.Length > maxBytes)
+            {
+                break;
+            }
+
+            result.AddRange(charBytes);
+        }
+
+        return result.ToArray();
     }
 }

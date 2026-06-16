@@ -24,14 +24,23 @@ public class ChatMessageItem : MonoBehaviour
 
     private void UpdateHeight()
     {
-        if (layoutElement == null)
+        if (layoutElement == null || messageText == null)
         {
             return;
         }
 
         messageText.ForceMeshUpdate();
 
-        float preferredHeight = messageText.preferredHeight + verticalPadding;
+        float width = messageText.rectTransform.rect.width;
+
+        if (width <= 0.0f)
+        {
+            width = 280.0f;
+        }
+
+        Vector2 preferredValues = messageText.GetPreferredValues(messageText.text, width, 0.0f);
+
+        float preferredHeight = preferredValues.y + verticalPadding;
 
         if (preferredHeight < minHeight)
         {

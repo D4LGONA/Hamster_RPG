@@ -9,7 +9,7 @@ constexpr std::uint16_t PORT_NUM = 4000;
 
 constexpr int NAME_SIZE = 20;
 constexpr int MAX_USER = 10000;
-constexpr int CHAT_SIZE = 80;
+constexpr int CHAT_SIZE = 256;
 
 
 enum class PACKET_TYPE : std::uint16_t
