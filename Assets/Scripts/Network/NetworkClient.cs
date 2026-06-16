@@ -566,6 +566,7 @@ public class NetworkClient : MonoBehaviour
             return;
         }
 
+        remotePlayer.SetName(name);
         remotePlayer.SetTargetPosition(position);
         remotePlayers.Add(id, remotePlayer);
 
