@@ -29,7 +29,49 @@ public static class Protocol
         SC_SPAWN = 6,
         SC_DESPAWN = 7,
         SC_MOVEOBJECT = 8,
-        SC_CHAT = 9
+        SC_CHAT = 9,
+        SC_STAT_UPDATE
+    }
+    public struct PlayerStatsData
+    {
+        public uint id;
+
+        public int level;
+        public int exp;
+        public int requiredExp;
+        public int gold;
+
+        public int hp;
+        public int maxHp;
+        public int attack;
+        public int defense;
+
+        public float moveSpeed;
+
+        public int combatPower;
+    }
+
+    public static PlayerStatsData ReadPlayerStatsData(byte[] buffer, ref int offset)
+    {
+        PlayerStatsData data = new PlayerStatsData();
+
+        data.id = ReadUInt(buffer, ref offset);
+
+        data.level = ReadInt(buffer, ref offset);
+        data.exp = ReadInt(buffer, ref offset);
+        data.requiredExp = ReadInt(buffer, ref offset);
+        data.gold = ReadInt(buffer, ref offset);
+
+        data.hp = ReadInt(buffer, ref offset);
+        data.maxHp = ReadInt(buffer, ref offset);
+        data.attack = ReadInt(buffer, ref offset);
+        data.defense = ReadInt(buffer, ref offset);
+
+        data.moveSpeed = ReadFloat(buffer, ref offset);
+
+        data.combatPower = ReadInt(buffer, ref offset);
+
+        return data;
     }
 
     public static byte[] MakeLoginPacket(string playerName)
@@ -110,6 +152,13 @@ public static class Protocol
     {
         uint value = BitConverter.ToUInt32(buffer, offset);
         offset += sizeof(uint);
+        return value;
+    }
+
+    public static int ReadInt(byte[] buffer, ref int offset)
+    {
+        int value = BitConverter.ToInt32(buffer, offset);
+        offset += sizeof(int);
         return value;
     }
 

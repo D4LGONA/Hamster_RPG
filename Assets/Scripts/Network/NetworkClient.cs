@@ -1,6 +1,6 @@
 // 2026-06-12: NetworkClient.cs
-// º≠πˆ ¡¢º”, ∑Œ±◊¿Œ, ∆–≈∂ º€ºˆΩ≈, «√∑π¿ÃæÓ Ω∫∆˘/¿Ãµø µø±‚»≠ ∞¸∏Æ
-// 2026-06-16: SendChat() √ﬂ∞°
+// ÔøΩÔøΩÔøΩÔøΩ ÔøΩÔøΩÔøΩÔøΩ, ÔøΩŒ±ÔøΩÔøΩÔøΩ, ÔøΩÔøΩ≈∂ ÔøΩ€ºÔøΩÔøΩÔøΩ, ÔøΩ√∑ÔøΩÔøΩÃæÔøΩ ÔøΩÔøΩÔøΩÔøΩ/ÔøΩÃµÔøΩ ÔøΩÔøΩÔøΩÔøΩ»≠ ÔøΩÔøΩÔøΩÔøΩ
+// 2026-06-16: SendChat(), StatUpdate ÔøΩﬂ∞ÔøΩ
 
 using System;
 using System.Collections.Concurrent;
@@ -26,6 +26,9 @@ public class NetworkClient : MonoBehaviour
     [Header("Debug")]
     [SerializeField] private bool enableNetworkLog = true;
 
+    private Protocol.PlayerStatsData myStats;
+    private bool hasMyStats;
+
     private TcpClient client;
     private NetworkStream stream;
     private Thread receiveThread;
@@ -44,7 +47,6 @@ public class NetworkClient : MonoBehaviour
 
     private readonly byte[] receiveTempBuffer = new byte[4096];
     private readonly List<byte> receiveBuffer = new List<byte>();
-
     private readonly ConcurrentQueue<Action> mainThreadActions = new ConcurrentQueue<Action>();
 
     private readonly Dictionary<uint, RemotePlayer> remotePlayers = new Dictionary<uint, RemotePlayer>();
@@ -60,6 +62,8 @@ public class NetworkClient : MonoBehaviour
 
     private void Awake()
     {
+        Application.runInBackground = true;
+
         if (Instance != null)
         {
             Destroy(gameObject);
@@ -68,25 +72,20 @@ public class NetworkClient : MonoBehaviour
 
         Instance = this;
         DontDestroyOnLoad(gameObject);
-
         SceneManager.sceneLoaded += OnSceneLoaded;
     }
 
     private void Update()
     {
-        while (mainThreadActions.TryDequeue(out Action action))
-        {
-            action.Invoke();
-        }
+        while (mainThreadActions.TryDequeue(out Action action)) action.Invoke();
     }
 
     private void OnDestroy()
     {
-        if (Instance == this)
-        {
-            SceneManager.sceneLoaded -= OnSceneLoaded;
-            Instance = null;
-        }
+        if (Instance != this) return;
+
+        SceneManager.sceneLoaded -= OnSceneLoaded;
+        Instance = null;
     }
 
     private void OnApplicationQuit()
@@ -95,20 +94,11 @@ public class NetworkClient : MonoBehaviour
         Disconnect();
     }
 
-    public bool IsConnected()
-    {
-        return isConnected;
-    }
-
-    public bool IsLoggedIn()
-    {
-        return isLoggedIn;
-    }
-
-    public uint GetMyPlayerId()
-    {
-        return myPlayerId;
-    }
+    public bool IsConnected() { return isConnected; }
+    public bool IsLoggedIn() { return isLoggedIn; }
+    public uint GetMyPlayerId() { return myPlayerId; }
+    public bool HasMyStats() { return hasMyStats; }
+    public Protocol.PlayerStatsData GetMyStats() { return myStats; }
 
     public void ConnectToServer(string inputName)
     {
@@ -118,12 +108,7 @@ public class NetworkClient : MonoBehaviour
             return;
         }
 
-        playerName = "Hamster";
-
-        if (string.IsNullOrWhiteSpace(inputName) == false)
-        {
-            playerName = inputName.Trim();
-        }
+        playerName = string.IsNullOrWhiteSpace(inputName) ? "Hamster" : inputName.Trim();
 
         try
         {
@@ -132,7 +117,6 @@ public class NetworkClient : MonoBehaviour
             client.Connect(serverIp, serverPort);
 
             stream = client.GetStream();
-
             isConnected = true;
             isLoggedIn = false;
 
@@ -141,7 +125,6 @@ public class NetworkClient : MonoBehaviour
             receiveThread.Start();
 
             SendLogin();
-
             Log("[NETWORK] Connected. name = " + playerName);
         }
         catch (Exception e)
@@ -155,18 +138,12 @@ public class NetworkClient : MonoBehaviour
     {
         if (isConnected == false || isLoggedIn == false || stream == null)
         {
-            Debug.LogWarning(
-                "[NETWORK] SendMove blocked. isConnected = " + isConnected +
-                ", isLoggedIn = " + isLoggedIn +
-                ", stream null = " + (stream == null)
-            );
+            Debug.LogWarning("[NETWORK] SendMove blocked. isConnected = " + isConnected + ", isLoggedIn = " + isLoggedIn + ", stream null = " + (stream == null));
             return;
         }
 
         Log("[NETWORK] SendMove x = " + position.x + ", y = " + position.y);
-
-        byte[] packet = Protocol.MakeMovePacket(position.x, position.y);
-        SendRaw(packet);
+        SendRaw(Protocol.MakeMovePacket(position.x, position.y));
     }
 
     public void SendChat(string message)
@@ -177,27 +154,18 @@ public class NetworkClient : MonoBehaviour
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(message))
-        {
-            return;
-        }
+        if (string.IsNullOrWhiteSpace(message)) return;
 
         message = message.Trim();
-
         Log("[NETWORK] SendChat message = " + message);
-
-        byte[] packet = Protocol.MakeChatPacket(message);
-        SendRaw(packet);
+        SendRaw(Protocol.MakeChatPacket(message));
     }
+
     private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
     {
-        if (scene.name != gameSceneName)
-        {
-            return;
-        }
+        if (scene.name != gameSceneName) return;
 
         Log("[NETWORK] Game scene loaded");
-
         SpawnLocalPlayer();
         FlushPendingPackets();
     }
@@ -210,69 +178,50 @@ public class NetworkClient : MonoBehaviour
             return;
         }
 
-        if (localPlayerObject != null)
-        {
-            Destroy(localPlayerObject);
-            localPlayerObject = null;
-        }
+        if (localPlayerObject != null) Destroy(localPlayerObject);
 
-        localPlayerObject = Instantiate(
-            localPlayerPrefab,
-            new Vector3(loginPosition.x, loginPosition.y, 0.0f),
-            Quaternion.identity
-        );
-
+        localPlayerObject = Instantiate(localPlayerPrefab, new Vector3(loginPosition.x, loginPosition.y, 0.0f), Quaternion.identity);
         localPlayerObject.name = "LocalPlayer_" + myPlayerId;
 
-        Log("[NETWORK] Spawn local player. id = " + myPlayerId +
-            ", x = " + loginPosition.x +
-            ", y = " + loginPosition.y);
+        // 2026-07-14: Î°úÏª¨ ÌîåÎ†àÏù¥Ïñ¥Îäî Î°úÍ∑∏Ïù∏ ÌõÑ ÏÉùÏÑ±ÎêòÎØÄÎ°ú, ÏãúÎÑ§Î®∏Ïã† Ïπ¥Î©îÎùºÏùò FollowÎ•º Ïù¥ ÏãúÏ†êÏóê Ïó∞Í≤∞ÌïúÎã§.
+        var virtualCamera = FindObjectOfType<Cinemachine.CinemachineVirtualCamera>();
+        if (virtualCamera != null)
+        {
+            virtualCamera.Follow = localPlayerObject.transform;
+        }
+        else
+        {
+            Debug.LogWarning("[NETWORK] CinemachineVirtualCamera not found in scene. Camera will not follow the player.");
+        }
+
+        Log("[NETWORK] Spawn local player. id = " + myPlayerId + ", x = " + loginPosition.x + ", y = " + loginPosition.y);
     }
 
     private void SendLogin()
     {
-        if (isConnected == false || stream == null)
-        {
-            return;
-        }
+        if (isConnected == false || stream == null) return;
 
-        byte[] packet = Protocol.MakeLoginPacket(playerName);
-        SendRaw(packet);
-
+        SendRaw(Protocol.MakeLoginPacket(playerName));
         Log("[NETWORK] SendLogin name = " + playerName);
     }
 
     private void SendLogout()
     {
-        if (isConnected == false || stream == null)
-        {
-            return;
-        }
+        if (isConnected == false || stream == null) return;
 
-        byte[] packet = Protocol.MakeLogoutPacket();
-        SendRaw(packet);
-
+        SendRaw(Protocol.MakeLogoutPacket());
         Log("[NETWORK] SendLogout");
     }
 
     private void SendRaw(byte[] packet)
     {
-        if (packet == null || packet.Length <= 0)
-        {
-            return;
-        }
+        if (packet == null || packet.Length <= 0) return;
 
         lock (sendLock)
         {
-            if (stream == null)
-            {
-                return;
-            }
+            if (stream == null) return;
 
-            try
-            {
-                stream.Write(packet, 0, packet.Length);
-            }
+            try { stream.Write(packet, 0, packet.Length); }
             catch (Exception e)
             {
                 Debug.LogError("[NETWORK] Send failed: " + e.Message);
@@ -301,20 +250,12 @@ public class NetworkClient : MonoBehaviour
                     break;
                 }
 
-                for (int i = 0; i < bytes; ++i)
-                {
-                    receiveBuffer.Add(receiveTempBuffer[i]);
-                }
-
+                for (int i = 0; i < bytes; ++i) receiveBuffer.Add(receiveTempBuffer[i]);
                 ProcessReceiveBuffer();
             }
             catch (Exception e)
             {
-                mainThreadActions.Enqueue(() =>
-                {
-                    Debug.LogWarning("[NETWORK] Receive stopped: " + e.Message);
-                });
-
+                mainThreadActions.Enqueue(() => Debug.LogWarning("[NETWORK] Receive stopped: " + e.Message));
                 Disconnect();
                 break;
             }
@@ -325,13 +266,9 @@ public class NetworkClient : MonoBehaviour
     {
         while (true)
         {
-            if (receiveBuffer.Count < Protocol.HeaderSize)
-            {
-                return;
-            }
+            if (receiveBuffer.Count < Protocol.HeaderSize) return;
 
-            byte[] bufferArray = receiveBuffer.ToArray();
-            ushort packetSize = Protocol.ReadPacketSize(bufferArray);
+            ushort packetSize = Protocol.ReadPacketSize(receiveBuffer.ToArray());
 
             if (packetSize < Protocol.HeaderSize)
             {
@@ -340,10 +277,7 @@ public class NetworkClient : MonoBehaviour
                 return;
             }
 
-            if (receiveBuffer.Count < packetSize)
-            {
-                return;
-            }
+            if (receiveBuffer.Count < packetSize) return;
 
             byte[] packet = receiveBuffer.GetRange(0, packetSize).ToArray();
             receiveBuffer.RemoveRange(0, packetSize);
@@ -355,38 +289,30 @@ public class NetworkClient : MonoBehaviour
     private void ProcessPacket(byte[] packet)
     {
         Protocol.PacketType packetType = Protocol.ReadPacketType(packet);
-
-        mainThreadActions.Enqueue(() =>
-        {
-            Log("[NETWORK] Recv packet type = " + packetType + ", size = " + packet.Length);
-        });
+        mainThreadActions.Enqueue(() => Log("[NETWORK] Recv packet type = " + packetType + ", size = " + packet.Length));
 
         switch (packetType)
         {
-            case Protocol.PacketType.SC_LOGIN_RESULT:
-                HandleLoginResult(packet);
+            case Protocol.PacketType.SC_LOGIN_RESULT: 
+                HandleLoginResult(packet); 
                 break;
-
-            case Protocol.PacketType.SC_SPAWN:
-                HandleSpawn(packet);
+            case Protocol.PacketType.SC_SPAWN: 
+                HandleSpawn(packet); 
                 break;
-
-            case Protocol.PacketType.SC_DESPAWN:
-                HandleDespawn(packet);
+            case Protocol.PacketType.SC_DESPAWN: 
+                HandleDespawn(packet); 
                 break;
-
-            case Protocol.PacketType.SC_MOVEOBJECT:
-                HandleMove(packet);
+            case Protocol.PacketType.SC_MOVEOBJECT: 
+                HandleMove(packet); 
                 break;
-
-            case Protocol.PacketType.SC_CHAT:
-                HandleChat(packet);
+            case Protocol.PacketType.SC_CHAT: 
+                HandleChat(packet); 
+                break;
+            case Protocol.PacketType.SC_STAT_UPDATE: 
+                HandleStatUpdate(packet); 
                 break;
             default:
-                mainThreadActions.Enqueue(() =>
-                {
-                    Debug.LogWarning("[NETWORK] Unknown packet type: " + packetType);
-                });
+                mainThreadActions.Enqueue(() => Debug.LogWarning("[NETWORK] Unknown packet type: " + packetType));
                 break;
         }
     }
@@ -412,10 +338,7 @@ public class NetworkClient : MonoBehaviour
             isLoggedIn = true;
             loginPosition = new Vector2(x, y);
 
-            Log("[NETWORK] Login success. myPlayerId = " + myPlayerId +
-                ", x = " + x +
-                ", y = " + y);
-
+            Log("[NETWORK] Login success. myPlayerId = " + myPlayerId + ", x = " + x + ", y = " + y);
             SceneManager.LoadScene(gameSceneName);
         });
     }
@@ -438,11 +361,7 @@ public class NetworkClient : MonoBehaviour
             }
 
             Vector2 position = new Vector2(x, y);
-
-            Log("[NETWORK] Spawn packet. id = " + id +
-                ", name = " + name +
-                ", x = " + x +
-                ", y = " + y);
+            Log("[NETWORK] Spawn packet. id = " + id + ", name = " + name + ", x = " + x + ", y = " + y);
 
             if (SceneManager.GetActiveScene().name != gameSceneName)
             {
@@ -458,17 +377,12 @@ public class NetworkClient : MonoBehaviour
     private void HandleDespawn(byte[] packet)
     {
         int offset = Protocol.HeaderSize;
-
         uint id = Protocol.ReadUInt(packet, ref offset);
 
         mainThreadActions.Enqueue(() =>
         {
             RemovePendingSpawn(id);
-
-            if (pendingMoves.ContainsKey(id))
-            {
-                pendingMoves.Remove(id);
-            }
+            if (pendingMoves.ContainsKey(id)) pendingMoves.Remove(id);
 
             if (remotePlayers.TryGetValue(id, out RemotePlayer remotePlayer))
             {
@@ -490,9 +404,7 @@ public class NetworkClient : MonoBehaviour
 
         mainThreadActions.Enqueue(() =>
         {
-            Log("[NETWORK] Move packet. id = " + id +
-                ", x = " + x +
-                ", y = " + y);
+            Log("[NETWORK] Move packet. id = " + id + ", x = " + x + ", y = " + y);
 
             if (id == myPlayerId)
             {
@@ -524,14 +436,30 @@ public class NetworkClient : MonoBehaviour
 
         mainThreadActions.Enqueue(() =>
         {
-            Log("[NETWORK] Chat packet. id = " + id +
-                ", name = " + name +
-                ", message = " + message);
+            Log("[NETWORK] Chat packet. id = " + id + ", name = " + name + ", message = " + message);
+            if (ChatUI.Instance != null) ChatUI.Instance.AddMessage(name, message);
+        });
+    }
 
-            if (ChatUI.Instance != null)
-            {
-                ChatUI.Instance.AddMessage(name, message);
-            }
+    private void HandleStatUpdate(byte[] packet)
+    {
+        int offset = Protocol.HeaderSize;
+        Protocol.PlayerStatsData stats = Protocol.ReadPlayerStatsData(packet, ref offset);
+
+        mainThreadActions.Enqueue(() =>
+        {
+            myStats = stats;
+            hasMyStats = true;
+
+            Log("[NETWORK] Stat update. id = " + stats.id +
+                ", level = " + stats.level +
+                ", exp = " + stats.exp + "/" + stats.requiredExp +
+                ", gold = " + stats.gold +
+                ", hp = " + stats.hp + "/" + stats.maxHp +
+                ", attack = " + stats.attack +
+                ", defense = " + stats.defense +
+                ", moveSpeed = " + stats.moveSpeed +
+                ", combatPower = " + stats.combatPower);
         });
     }
 
@@ -549,12 +477,7 @@ public class NetworkClient : MonoBehaviour
             return;
         }
 
-        GameObject obj = Instantiate(
-            remotePlayerPrefab,
-            new Vector3(position.x, position.y, 0.0f),
-            Quaternion.identity
-        );
-
+        GameObject obj = Instantiate(remotePlayerPrefab, new Vector3(position.x, position.y, 0.0f), Quaternion.identity);
         obj.name = "RemotePlayer_" + id + "_" + name;
 
         RemotePlayer remotePlayer = obj.GetComponent<RemotePlayer>();
@@ -574,39 +497,30 @@ public class NetworkClient : MonoBehaviour
         {
             remotePlayer.SetTargetPosition(pendingPosition);
             pendingMoves.Remove(id);
-
-            Log("[NETWORK] Apply pending move. id = " + id +
-                ", x = " + pendingPosition.x +
-                ", y = " + pendingPosition.y);
+            Log("[NETWORK] Apply pending move. id = " + id + ", x = " + pendingPosition.x + ", y = " + pendingPosition.y);
         }
 
-        Log("[NETWORK] Spawn remote player. id = " + id +
-            ", name = " + name +
-            ", x = " + position.x +
-            ", y = " + position.y);
+        Log("[NETWORK] Spawn remote player. id = " + id + ", name = " + name + ", x = " + position.x + ", y = " + position.y);
     }
 
     private void AddPendingSpawn(uint id, string name, Vector2 position)
     {
         for (int i = 0; i < pendingSpawns.Count; ++i)
         {
-            if (pendingSpawns[i].id == id)
-            {
-                SpawnInfo updatedSpawn = new SpawnInfo();
-                updatedSpawn.id = id;
-                updatedSpawn.name = name;
-                updatedSpawn.position = position;
+            if (pendingSpawns[i].id != id) continue;
 
-                pendingSpawns[i] = updatedSpawn;
-                return;
-            }
+            SpawnInfo updatedSpawn = new SpawnInfo();
+            updatedSpawn.id = id;
+            updatedSpawn.name = name;
+            updatedSpawn.position = position;
+            pendingSpawns[i] = updatedSpawn;
+            return;
         }
 
         SpawnInfo spawnInfo = new SpawnInfo();
         spawnInfo.id = id;
         spawnInfo.name = name;
         spawnInfo.position = position;
-
         pendingSpawns.Add(spawnInfo);
     }
 
@@ -614,17 +528,13 @@ public class NetworkClient : MonoBehaviour
     {
         for (int i = pendingSpawns.Count - 1; i >= 0; --i)
         {
-            if (pendingSpawns[i].id == id)
-            {
-                pendingSpawns.RemoveAt(i);
-            }
+            if (pendingSpawns[i].id == id) pendingSpawns.RemoveAt(i);
         }
     }
 
     private void FlushPendingPackets()
     {
-        Log("[NETWORK] Flush pending packets. spawn count = " + pendingSpawns.Count +
-            ", move count = " + pendingMoves.Count);
+        Log("[NETWORK] Flush pending packets. spawn count = " + pendingSpawns.Count + ", move count = " + pendingMoves.Count);
 
         for (int i = 0; i < pendingSpawns.Count; ++i)
         {
@@ -638,21 +548,14 @@ public class NetworkClient : MonoBehaviour
 
         foreach (KeyValuePair<uint, Vector2> pair in pendingMoves)
         {
-            if (remotePlayers.TryGetValue(pair.Key, out RemotePlayer remotePlayer))
-            {
-                remotePlayer.SetTargetPosition(pair.Value);
-                appliedMoveIds.Add(pair.Key);
+            if (remotePlayers.TryGetValue(pair.Key, out RemotePlayer remotePlayer) == false) continue;
 
-                Log("[NETWORK] Flush pending move. id = " + pair.Key +
-                    ", x = " + pair.Value.x +
-                    ", y = " + pair.Value.y);
-            }
+            remotePlayer.SetTargetPosition(pair.Value);
+            appliedMoveIds.Add(pair.Key);
+            Log("[NETWORK] Flush pending move. id = " + pair.Key + ", x = " + pair.Value.x + ", y = " + pair.Value.y);
         }
 
-        for (int i = 0; i < appliedMoveIds.Count; ++i)
-        {
-            pendingMoves.Remove(appliedMoveIds[i]);
-        }
+        for (int i = 0; i < appliedMoveIds.Count; ++i) pendingMoves.Remove(appliedMoveIds[i]);
     }
 
     private void Disconnect()
@@ -678,9 +581,6 @@ public class NetworkClient : MonoBehaviour
 
     private void Log(string message)
     {
-        if (enableNetworkLog)
-        {
-            Debug.Log(message);
-        }
+        if (enableNetworkLog) Debug.Log(message);
     }
 }

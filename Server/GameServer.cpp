@@ -311,29 +311,49 @@ void GameServer::ProcessPacket(std::uint32_t playerId, const char* data, int byt
 void GameServer::ProcessLogin(std::uint32_t playerId, const CS_LOGIN_PACKET* packet)
 {
     std::string playerName(packet->name, strnlen_s(packet->name, NAME_SIZE));
-    Player self{ playerId, playerName, 0.0f, 0.0f };
 
-    {
-        std::lock_guard<std::mutex> lock(playersLock);
-        players[playerId] = self;
-    }
+    std::uint32_t selfId = 0;
+    std::string selfName;
+    float selfX = 0.0f;
+    float selfY = 0.0f;
+    PlayerStats selfStats;
 
-    SC_LOGIN_RESULT_PACKET loginResult{};
-    loginResult.size = sizeof(SC_LOGIN_RESULT_PACKET);
-    loginResult.type = PACKET_TYPE::SC_LOGIN_RESULT;
-    loginResult.success = 1;
-    loginResult.id = self.GetId();
-    loginResult.x = self.GetX();
-    loginResult.y = self.GetY();
-
-    SendPacket(playerId, &loginResult, loginResult.size);
+    std::vector<SC_SPAWN_PACKET> existingSpawnPackets;
 
     {
         std::lock_guard<std::mutex> lock(playersLock);
 
-        for (const auto& [otherId, other] : players) // 기존에 있는 유저들 스폰
+        auto existIter = players.find(playerId);
+
+        if (existIter != players.end())
         {
-            if (otherId == playerId) continue;
+            return;
+        }
+
+        Player player{ playerId, playerName, 0.0f, 0.0f };
+        player.RecalculateStats();
+
+        auto result = players.emplace(playerId, player);
+
+        if (result.second == false)
+        {
+            return;
+        }
+
+        const Player& self = result.first->second;
+
+        selfId = self.GetId();
+        selfName = self.GetName();
+        selfX = self.GetX();
+        selfY = self.GetY();
+        selfStats = self.GetStats();
+
+        for (const auto& [otherId, other] : players)
+        {
+            if (otherId == playerId)
+            {
+                continue;
+            }
 
             SC_SPAWN_PACKET spawn{};
             spawn.size = sizeof(SC_SPAWN_PACKET);
@@ -343,21 +363,44 @@ void GameServer::ProcessLogin(std::uint32_t playerId, const CS_LOGIN_PACKET* pac
             spawn.x = other.GetX();
             spawn.y = other.GetY();
 
-            SendPacket(playerId, &spawn, spawn.size);
+            existingSpawnPackets.push_back(spawn);
         }
+    }
+
+    SC_LOGIN_RESULT_PACKET loginResult{};
+    loginResult.size = sizeof(SC_LOGIN_RESULT_PACKET);
+    loginResult.type = PACKET_TYPE::SC_LOGIN_RESULT;
+    loginResult.success = 1;
+    loginResult.id = selfId;
+    loginResult.x = selfX;
+    loginResult.y = selfY;
+
+    SendPacket(playerId, &loginResult, loginResult.size);
+
+    // 로그인 직후 내 스탯 전송
+    SendStatUpdate(playerId, selfStats);
+
+    for (const SC_SPAWN_PACKET& spawn : existingSpawnPackets)
+    {
+        SendPacket(playerId, &spawn, spawn.size);
     }
 
     SC_SPAWN_PACKET newPlayerSpawn{};
     newPlayerSpawn.size = sizeof(SC_SPAWN_PACKET);
     newPlayerSpawn.type = PACKET_TYPE::SC_SPAWN;
-    newPlayerSpawn.id = self.GetId();
-    strncpy_s(newPlayerSpawn.name, sizeof(newPlayerSpawn.name), self.GetName().c_str(), _TRUNCATE);
-    newPlayerSpawn.x = self.GetX();
-    newPlayerSpawn.y = self.GetY();
+    newPlayerSpawn.id = selfId;
+    strncpy_s(newPlayerSpawn.name, sizeof(newPlayerSpawn.name), selfName.c_str(), _TRUNCATE);
+    newPlayerSpawn.x = selfX;
+    newPlayerSpawn.y = selfY;
 
     BroadcastPacket(&newPlayerSpawn, newPlayerSpawn.size, playerId);
 
-    std::cout << "[LOGIN] id = " << self.GetId() << ", name = " << self.GetName() << std::endl;
+    std::cout << "[LOGIN] id = " << selfId
+        << ", name = " << selfName << std::endl;
+
+    std::cout << "[STAT] id = " << selfId << ", level = " << selfStats.level << ", gold = " << selfStats.gold
+        << ", hp = " << selfStats.hp << "/" << selfStats.maxHp  << ", attack = " << selfStats.attack << ", defense = " << selfStats.defense
+        << ", moveSpeed = " << selfStats.moveSpeed << ", combatPower = " << selfStats.combatPower << std::endl;
 }
 
 void GameServer::ProcessMove(std::uint32_t playerId, const CS_MOVE_PACKET* packet)
@@ -422,6 +465,39 @@ void GameServer::ProcessChat(std::uint32_t playerId, const CS_CHAT_PACKET* packe
     std::cout << "[CHAT] id = " << playerId
         << ", name = " << senderName
         << ", message = " << message << std::endl;
+}
+
+void GameServer::SendStatUpdate(std::uint32_t playerId, const PlayerStats& stats)
+{
+    SC_STAT_UPDATE_PACKET statPacket{};
+    statPacket.size = sizeof(SC_STAT_UPDATE_PACKET);
+    statPacket.type = PACKET_TYPE::SC_STAT_UPDATE;
+
+    statPacket.id = playerId;
+
+    statPacket.level = stats.level;
+    statPacket.exp = stats.exp;
+    statPacket.requiredExp = stats.requiredExp;
+    statPacket.gold = stats.gold;
+
+    statPacket.hp = stats.hp;
+    statPacket.maxHp = stats.maxHp;
+    statPacket.attack = stats.attack;
+    statPacket.defense = stats.defense;
+
+    statPacket.moveSpeed = stats.moveSpeed;
+
+    statPacket.combatPower = stats.combatPower;
+
+    SendPacket(playerId, &statPacket, statPacket.size);
+
+    std::cout << "[STAT SEND] id = " << playerId
+        << ", level = " << stats.level
+        << ", hp = " << stats.hp << "/" << stats.maxHp
+        << ", attack = " << stats.attack
+        << ", defense = " << stats.defense
+        << ", combatPower = " << stats.combatPower
+        << std::endl;
 }
 
 void GameServer::SendPacket(std::uint32_t playerId, const void* packet, int size)

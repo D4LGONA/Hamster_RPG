@@ -1,5 +1,6 @@
 // 2026-06-11: GameServer.h 파일 제작. IOCP 서버 실행 흐름을 관리하는 클래스.
 // 2026-06-16: ProcessChat 추가.
+// 2026-06-17: SendStatUpdate 추가.
 #pragma once
 
 #include "stdafx.h"
@@ -28,6 +29,7 @@ private:
     void ProcessMove(std::uint32_t playerId, const CS_MOVE_PACKET* packet);
     void ProcessChat(std::uint32_t playerId, const CS_CHAT_PACKET* packet);
 
+    void SendStatUpdate(std::uint32_t playerId, const PlayerStats& stats);
     void SendPacket(std::uint32_t playerId, const void* packet, int size);
     void BroadcastPacket(const void* packet, int size, std::uint32_t exceptId = 0);
 

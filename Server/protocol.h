@@ -25,7 +25,8 @@ enum class PACKET_TYPE : std::uint16_t
     SC_SPAWN,
     SC_DESPAWN,
 	SC_MOVEOBJECT,
-    SC_CHAT
+    SC_CHAT,
+    SC_STAT_UPDATE
 };
 
 #pragma pack(push, 1)
@@ -117,6 +118,28 @@ struct SC_CHAT_PACKET
     std::uint32_t id;
     char name[NAME_SIZE];
     char message[CHAT_SIZE];
+};
+
+struct SC_STAT_UPDATE_PACKET
+{
+    std::uint16_t size;
+    PACKET_TYPE type;
+
+    std::uint32_t id;
+
+    int level;
+    int exp;
+    int requiredExp;
+    int gold;
+
+    int hp;
+    int maxHp;
+    int attack;
+    int defense;
+
+    float moveSpeed;
+
+    int combatPower;
 };
 
 #pragma pack(pop)
