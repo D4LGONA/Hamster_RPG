@@ -8,6 +8,7 @@
 #include "NetworkTypes.h"
 #include "Session.h"
 #include "Player.h"
+#include "SectorGrid.h"
 
 class GameServer
 {
@@ -33,6 +34,10 @@ private:
     void SendPacket(std::uint32_t playerId, const void* packet, int size);
     void BroadcastPacket(const void* packet, int size, std::uint32_t exceptId = 0);
 
+    // 시야처리(AOI) 헬퍼. 아래 두 함수는 playersLock을 잡은 상태에서만 호출한다.
+    SC_SPAWN_PACKET MakeSpawnPacket(const Player& player);
+    static bool InViewRange(const Player& a, const Player& b);
+
     void DisconnectPlayer(std::uint32_t playerId);
 
     Session* FindSession(std::uint32_t playerId);
@@ -52,4 +57,7 @@ private:
 
     std::mutex playersLock;
     std::unordered_map<std::uint32_t, Player> players;
+
+    // 섹터 격자도 playersLock으로 함께 보호한다(플레이어 위치/뷰리스트와 항상 같이 바뀌므로).
+    SectorGrid sectorGrid;
 };

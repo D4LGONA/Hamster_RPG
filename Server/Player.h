@@ -5,6 +5,7 @@
 #pragma once
 
 #include "stdafx.h"
+#include <unordered_set>
 #include "PlayerStats.h"
 
 class Player
@@ -29,6 +30,10 @@ public:
 
     const PlayerStats& GetStats() const { return stats; }
 
+    // 시야처리(AOI)용: 지금 내 눈에 보이는 상대 playerId 집합. playersLock으로 보호됨.
+    std::unordered_set<std::uint32_t>& GetViewList() { return viewList; }
+    const std::unordered_set<std::uint32_t>& GetViewList() const { return viewList; }
+
     void SetLoggedIn(bool newLoggedIn) { loggedIn = newLoggedIn; }
     void SetPosition(float newX, float newY) { x = newX; y = newY; }
     void SetName(const std::string& newName) { name = newName; }
@@ -43,4 +48,6 @@ private:
     bool loggedIn = false;
 
     PlayerStats stats;
+
+    std::unordered_set<std::uint32_t> viewList;
 };

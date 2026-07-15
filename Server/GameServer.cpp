@@ -1,6 +1,4 @@
 // 2026-06-11: GameServer.cpp 파일 제작. GameServer 클래스 구현.
-// 2026-06-12: 위치 동기화 작동 안함, 클라 문제로 추정.
-
 
 #include "stdafx.h"
 #include "GameServer.h"
@@ -308,24 +306,42 @@ void GameServer::ProcessPacket(std::uint32_t playerId, const char* data, int byt
     }
 }
 
+// playersLock을 잡은 상태에서 호출할 것.
+SC_SPAWN_PACKET GameServer::MakeSpawnPacket(const Player& player)
+{
+    SC_SPAWN_PACKET spawn{};
+    spawn.size = sizeof(SC_SPAWN_PACKET);
+    spawn.type = PACKET_TYPE::SC_SPAWN;
+    spawn.id = player.GetId();
+    strncpy_s(spawn.name, sizeof(spawn.name), player.GetName().c_str(), _TRUNCATE);
+    spawn.x = player.GetX();
+    spawn.y = player.GetY();
+    return spawn;
+}
+
+// 두 플레이어가 서로 시야 범위 안인지. sqrt 없이 제곱 거리로 비교(비용 절약).
+bool GameServer::InViewRange(const Player& a, const Player& b)
+{
+    float dx = a.GetX() - b.GetX();
+    float dy = a.GetY() - b.GetY();
+    return (dx * dx + dy * dy) <= (VIEW_RANGE * VIEW_RANGE);
+}
+
 void GameServer::ProcessLogin(std::uint32_t playerId, const CS_LOGIN_PACKET* packet)
 {
     std::string playerName(packet->name, strnlen_s(packet->name, NAME_SIZE));
 
-    std::uint32_t selfId = 0;
-    std::string selfName;
-    float selfX = 0.0f;
-    float selfY = 0.0f;
     PlayerStats selfStats;
+    SC_LOGIN_RESULT_PACKET loginResult{};
+    SC_SPAWN_PACKET selfSpawn{};
 
-    std::vector<SC_SPAWN_PACKET> existingSpawnPackets;
+    std::vector<SC_SPAWN_PACKET> spawnToMe;      // 내 화면에 띄울 주변 기존 플레이어들
+    std::vector<std::uint32_t> spawnMeTargets;   // 나를 spawn해줄 주변 상대들
 
     {
         std::lock_guard<std::mutex> lock(playersLock);
 
-        auto existIter = players.find(playerId);
-
-        if (existIter != players.end())
+        if (players.find(playerId) != players.end())
         {
             return;
         }
@@ -333,78 +349,91 @@ void GameServer::ProcessLogin(std::uint32_t playerId, const CS_LOGIN_PACKET* pac
         Player player{ playerId, playerName, 0.0f, 0.0f };
         player.RecalculateStats();
 
-        auto result = players.emplace(playerId, player);
+        auto result = players.emplace(playerId, std::move(player));
 
         if (result.second == false)
         {
             return;
         }
 
-        const Player& self = result.first->second;
-
-        selfId = self.GetId();
-        selfName = self.GetName();
-        selfX = self.GetX();
-        selfY = self.GetY();
+        Player& self = result.first->second;
         selfStats = self.GetStats();
 
-        for (const auto& [otherId, other] : players)
+        // 섹터 격자에 등록
+        sectorGrid.Add(playerId, self.GetX(), self.GetY());
+
+        // 전체 순회 대신 주변 3x3 섹터 후보만 모아 시야 판정
+        std::vector<std::uint32_t> nearby;
+        sectorGrid.GatherNearby(self.GetX(), self.GetY(), nearby);
+
+        for (std::uint32_t otherId : nearby)
         {
             if (otherId == playerId)
             {
                 continue;
             }
 
-            SC_SPAWN_PACKET spawn{};
-            spawn.size = sizeof(SC_SPAWN_PACKET);
-            spawn.type = PACKET_TYPE::SC_SPAWN;
-            spawn.id = other.GetId();
-            strncpy_s(spawn.name, sizeof(spawn.name), other.GetName().c_str(), _TRUNCATE);
-            spawn.x = other.GetX();
-            spawn.y = other.GetY();
+            auto otherIter = players.find(otherId);
 
-            existingSpawnPackets.push_back(spawn);
+            if (otherIter == players.end())
+            {
+                continue;
+            }
+
+            Player& other = otherIter->second;
+
+            if (InViewRange(self, other) == false)
+            {
+                continue;
+            }
+
+            // 서로 뷰리스트에 추가
+            self.GetViewList().insert(otherId);
+            other.GetViewList().insert(playerId);
+
+            spawnToMe.push_back(MakeSpawnPacket(other));   // 기존 플레이어 -> 나
+            spawnMeTargets.push_back(otherId);             // 나 -> 그 상대
         }
+
+        selfSpawn = MakeSpawnPacket(self);
+
+        loginResult.size = sizeof(SC_LOGIN_RESULT_PACKET);
+        loginResult.type = PACKET_TYPE::SC_LOGIN_RESULT;
+        loginResult.success = 1;
+        loginResult.id = self.GetId();
+        loginResult.x = self.GetX();
+        loginResult.y = self.GetY();
     }
 
-    SC_LOGIN_RESULT_PACKET loginResult{};
-    loginResult.size = sizeof(SC_LOGIN_RESULT_PACKET);
-    loginResult.type = PACKET_TYPE::SC_LOGIN_RESULT;
-    loginResult.success = 1;
-    loginResult.id = selfId;
-    loginResult.x = selfX;
-    loginResult.y = selfY;
-
+    // ---- playersLock 해제 후 전송(락 순서: players -> sessions 유지) ----
     SendPacket(playerId, &loginResult, loginResult.size);
-
-    // 로그인 직후 내 스탯 전송
     SendStatUpdate(playerId, selfStats);
 
-    for (const SC_SPAWN_PACKET& spawn : existingSpawnPackets)
+    for (const SC_SPAWN_PACKET& spawn : spawnToMe)
     {
         SendPacket(playerId, &spawn, spawn.size);
     }
 
-    SC_SPAWN_PACKET newPlayerSpawn{};
-    newPlayerSpawn.size = sizeof(SC_SPAWN_PACKET);
-    newPlayerSpawn.type = PACKET_TYPE::SC_SPAWN;
-    newPlayerSpawn.id = selfId;
-    strncpy_s(newPlayerSpawn.name, sizeof(newPlayerSpawn.name), selfName.c_str(), _TRUNCATE);
-    newPlayerSpawn.x = selfX;
-    newPlayerSpawn.y = selfY;
+    for (std::uint32_t targetId : spawnMeTargets)
+    {
+        SendPacket(targetId, &selfSpawn, selfSpawn.size);
+    }
 
-    BroadcastPacket(&newPlayerSpawn, newPlayerSpawn.size, playerId);
-
-    std::cout << "[LOGIN] id = " << selfId
-        << ", name = " << selfName << std::endl;
-
-    std::cout << "[STAT] id = " << selfId << ", level = " << selfStats.level << ", gold = " << selfStats.gold
-        << ", hp = " << selfStats.hp << "/" << selfStats.maxHp  << ", attack = " << selfStats.attack << ", defense = " << selfStats.defense
-        << ", moveSpeed = " << selfStats.moveSpeed << ", combatPower = " << selfStats.combatPower << std::endl;
+    std::cout << "[LOGIN] id = " << loginResult.id
+        << ", name = " << playerName
+        << ", view = " << spawnMeTargets.size() << std::endl;
 }
 
 void GameServer::ProcessMove(std::uint32_t playerId, const CS_MOVE_PACKET* packet)
 {
+    SC_MOVE_PACKET movePacket{};
+    SC_SPAWN_PACKET selfSpawn{};
+
+    std::vector<std::uint32_t> moveTargets;      // 계속 보이는 상대 -> 내 이동 전송
+    std::vector<SC_SPAWN_PACKET> spawnToMe;      // 새로 보이는 상대 -> 나에게 spawn
+    std::vector<std::uint32_t> spawnMeTargets;   // 나를 새로 보게 된 상대 -> 그들에게 내 spawn
+    std::vector<std::uint32_t> despawnTargets;   // 시야에서 서로 벗어난 상대들 (양방향 despawn)
+
     {
         std::lock_guard<std::mutex> lock(playersLock);
 
@@ -415,17 +444,127 @@ void GameServer::ProcessMove(std::uint32_t playerId, const CS_MOVE_PACKET* packe
             return;
         }
 
-        iter->second.SetPosition(packet->x, packet->y);
+        Player& me = iter->second;
+
+        float oldX = me.GetX();
+        float oldY = me.GetY();
+        float newX = packet->x;
+        float newY = packet->y;
+
+        me.SetPosition(newX, newY);
+        sectorGrid.Move(playerId, oldX, oldY, newX, newY);
+
+        selfSpawn = MakeSpawnPacket(me);
+
+        movePacket.size = sizeof(SC_MOVE_PACKET);
+        movePacket.type = PACKET_TYPE::SC_MOVEOBJECT;
+        movePacket.id = playerId;
+        movePacket.x = newX;
+        movePacket.y = newY;
+
+        // 이동 후 새 시야 계산 (주변 3x3 섹터 후보 -> 거리 판정)
+        std::vector<std::uint32_t> nearby;
+        sectorGrid.GatherNearby(newX, newY, nearby);
+
+        std::unordered_set<std::uint32_t> newView;
+
+        for (std::uint32_t otherId : nearby)
+        {
+            if (otherId == playerId)
+            {
+                continue;
+            }
+
+            auto otherIter = players.find(otherId);
+
+            if (otherIter == players.end())
+            {
+                continue;
+            }
+
+            if (InViewRange(me, otherIter->second))
+            {
+                newView.insert(otherId);
+            }
+        }
+
+        std::unordered_set<std::uint32_t>& oldView = me.GetViewList();
+
+        // 새 시야 순회: 새로 들어온 사람은 spawn, 계속 있는 사람은 move
+        for (std::uint32_t otherId : newView)
+        {
+            if (oldView.find(otherId) == oldView.end())
+            {
+                // 새로 시야에 진입 -> 서로 spawn
+                auto otherIter = players.find(otherId);
+
+                if (otherIter != players.end())
+                {
+                    otherIter->second.GetViewList().insert(playerId);
+                    spawnToMe.push_back(MakeSpawnPacket(otherIter->second));
+                    spawnMeTargets.push_back(otherId);
+                }
+            }
+            else
+            {
+                // 계속 보이는 중 -> 내 이동을 상대에게
+                moveTargets.push_back(otherId);
+            }
+        }
+
+        // 예전 시야엔 있었는데 새 시야엔 없는 사람 -> 서로 despawn
+        for (std::uint32_t otherId : oldView)
+        {
+            if (newView.find(otherId) != newView.end())
+            {
+                continue;
+            }
+
+            auto otherIter = players.find(otherId);
+
+            if (otherIter != players.end())
+            {
+                otherIter->second.GetViewList().erase(playerId);
+            }
+
+            despawnTargets.push_back(otherId);
+        }
+
+        oldView = std::move(newView);   // 내 뷰리스트 갱신
     }
 
-    SC_MOVE_PACKET movePacket{};
-    movePacket.size = sizeof(SC_MOVE_PACKET);
-    movePacket.type = PACKET_TYPE::SC_MOVEOBJECT;
-    movePacket.id = playerId;
-    movePacket.x = packet->x;
-    movePacket.y = packet->y;
+    // ---- playersLock 해제 후 전송 ----
+    for (std::uint32_t targetId : moveTargets)
+    {
+        SendPacket(targetId, &movePacket, movePacket.size);
+    }
 
-    BroadcastPacket(&movePacket, movePacket.size, playerId);
+    for (const SC_SPAWN_PACKET& spawn : spawnToMe)
+    {
+        SendPacket(playerId, &spawn, spawn.size);
+    }
+
+    for (std::uint32_t targetId : spawnMeTargets)
+    {
+        SendPacket(targetId, &selfSpawn, selfSpawn.size);
+    }
+
+    for (std::uint32_t otherId : despawnTargets)
+    {
+        // 상대에게 "나" despawn
+        SC_DESPAWN_PACKET despawnMe{};
+        despawnMe.size = sizeof(SC_DESPAWN_PACKET);
+        despawnMe.type = PACKET_TYPE::SC_DESPAWN;
+        despawnMe.id = playerId;
+        SendPacket(otherId, &despawnMe, despawnMe.size);
+
+        // 나에게 "상대" despawn
+        SC_DESPAWN_PACKET despawnOther{};
+        despawnOther.size = sizeof(SC_DESPAWN_PACKET);
+        despawnOther.type = PACKET_TYPE::SC_DESPAWN;
+        despawnOther.id = otherId;
+        SendPacket(playerId, &despawnOther, despawnOther.size);
+    }
 }
 
 void GameServer::ProcessChat(std::uint32_t playerId, const CS_CHAT_PACKET* packet)
@@ -535,6 +674,7 @@ void GameServer::BroadcastPacket(const void* packet, int size, std::uint32_t exc
 void GameServer::DisconnectPlayer(std::uint32_t playerId)
 {
     bool existed = false;
+    std::vector<std::uint32_t> viewers;   // 나를 시야에 두고 있던 사람들
 
     {
         std::lock_guard<std::mutex> lock(playersLock);
@@ -543,6 +683,24 @@ void GameServer::DisconnectPlayer(std::uint32_t playerId)
 
         if (iter != players.end())
         {
+            Player& me = iter->second;
+
+            // 섹터 격자에서 제거
+            sectorGrid.Remove(playerId, me.GetX(), me.GetY());
+
+            // 나를 보던 사람들의 뷰리스트에서 나를 지우고, despawn 대상으로 수집
+            for (std::uint32_t otherId : me.GetViewList())
+            {
+                auto otherIter = players.find(otherId);
+
+                if (otherIter != players.end())
+                {
+                    otherIter->second.GetViewList().erase(playerId);
+                }
+
+                viewers.push_back(otherId);
+            }
+
             players.erase(iter);
             existed = true;
         }
@@ -570,9 +728,12 @@ void GameServer::DisconnectPlayer(std::uint32_t playerId)
     despawn.type = PACKET_TYPE::SC_DESPAWN;
     despawn.id = playerId;
 
-    BroadcastPacket(&despawn, despawn.size, playerId);
+    for (std::uint32_t targetId : viewers)
+    {
+        SendPacket(targetId, &despawn, despawn.size);
+    }
 
-    std::cout << "[DISCONNECT] id = " << playerId << std::endl;
+    std::cout << "[DISCONNECT] id = " << playerId << ", despawn to " << viewers.size() << std::endl;
 }
 
 Session* GameServer::FindSession(std::uint32_t playerId)
