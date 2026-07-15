@@ -13,16 +13,29 @@ public class RemotePlayer : MonoBehaviour
     // 이 거리 이상 튀면 보간 대신 즉시 순간이동(텔레포트/디싱크 보정).
     [SerializeField] private float snapDistance = 5.0f;
 
+    [Header("Animation")]
+    [SerializeField] private Animator animator;
+    // 이 프레임 이동량이 이보다 크면 '걷는 중'으로 본다(제곱거리).
+    [SerializeField] private float moveThresholdSqr = 0.0000001f;
+
     private Vector3 fromPosition;   // 보간 시작점(패킷 받은 순간의 실제 위치)
     private Vector3 toPosition;     // 보간 목표점(서버가 보낸 위치)
     private float elapsed;
     private bool hasTarget;
+
+    private Vector2 lastMoveDir = Vector2.down;   // 정지 시 바라볼 방향
+    private string currentAnimation;
 
     private void Awake()
     {
         if (characterNameText == null)
         {
             characterNameText = GetComponentInChildren<TMP_Text>();
+        }
+
+        if (animator == null)
+        {
+            animator = GetComponent<Animator>();
         }
     }
 
@@ -35,15 +48,70 @@ public class RemotePlayer : MonoBehaviour
 
     private void Update()
     {
-        if (hasTarget == false)
+        Vector3 before = transform.position;
+
+        if (hasTarget)
         {
-            return;
+            elapsed += Time.deltaTime;
+
+            float t = Mathf.Clamp01(elapsed / interpDuration);
+            transform.position = Vector3.Lerp(fromPosition, toPosition, t);
         }
 
-        elapsed += Time.deltaTime;
+        // 이번 프레임에 실제로 움직인 양으로 애니메이션 결정(서버가 방향을 안 보내도 이동으로 유추).
+        Vector2 delta = transform.position - before;
+        UpdateAnimation(delta);
+    }
 
-        float t = Mathf.Clamp01(elapsed / interpDuration);
-        transform.position = Vector3.Lerp(fromPosition, toPosition, t);
+    private void UpdateAnimation(Vector2 delta)
+    {
+        if (delta.sqrMagnitude > moveThresholdSqr)
+        {
+            lastMoveDir = delta.normalized;
+            PlayWalkAnimation(lastMoveDir);
+        }
+        else
+        {
+            PlayIdleAnimation(lastMoveDir);
+        }
+    }
+
+    // 아래 매핑은 PlayerMovement(로컬)와 동일하게 맞춘다.
+    private void PlayWalkAnimation(Vector2 dir)
+    {
+        if (Mathf.Abs(dir.x) > Mathf.Abs(dir.y))
+        {
+            if (dir.x > 0) PlayAnimation("Player_Walk_Right");
+            else PlayAnimation("Player_Walk_Left");
+        }
+        else
+        {
+            if (dir.y > 0) PlayAnimation("Player_Walk_Back");
+            else PlayAnimation("Player_Walk_Down");
+        }
+    }
+
+    private void PlayIdleAnimation(Vector2 dir)
+    {
+        if (Mathf.Abs(dir.x) > Mathf.Abs(dir.y))
+        {
+            if (dir.x > 0) PlayAnimation("Player_Idle_Right");
+            else PlayAnimation("Player_Idle_Left");
+        }
+        else
+        {
+            if (dir.y > 0) PlayAnimation("Player_Idle_Up");
+            else PlayAnimation("Player_Idle_Down");
+        }
+    }
+
+    private void PlayAnimation(string animationName)
+    {
+        if (animator == null) return;
+        if (currentAnimation == animationName) return;
+
+        currentAnimation = animationName;
+        animator.Play(animationName);
     }
 
     public void SetTargetPosition(Vector2 position)
