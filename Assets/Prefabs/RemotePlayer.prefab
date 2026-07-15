@@ -149,9 +149,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   characterNameText: {fileID: 2103266410342868410}
-  moveSpeed: 10
-  snapDistance: 2
-  arriveDistance: 0.01
+  interpDuration: 0.08
+  snapDistance: 5
 --- !u!1 &4097452037817899937
 GameObject:
   m_ObjectHideFlags: 0

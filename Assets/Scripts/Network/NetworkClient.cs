@@ -40,6 +40,7 @@ public class NetworkClient : MonoBehaviour
     private string playerName = "Hamster";
 
     private GameObject localPlayerObject;
+    private LocalPlayerInterpolator localInterpolator;   // 서버 권위 이동: 내 위치를 서버 값으로 보간
     private Vector2 loginPosition;
 
     private readonly object disconnectLock = new object();
@@ -134,16 +135,16 @@ public class NetworkClient : MonoBehaviour
         }
     }
 
-    public void SendMove(Vector2 position)
+    public void SendInput(Vector2 direction)
     {
         if (isConnected == false || isLoggedIn == false || stream == null)
         {
-            Debug.LogWarning("[NETWORK] SendMove blocked. isConnected = " + isConnected + ", isLoggedIn = " + isLoggedIn + ", stream null = " + (stream == null));
+            Debug.LogWarning("[NETWORK] SendInput blocked. isConnected = " + isConnected + ", isLoggedIn = " + isLoggedIn + ", stream null = " + (stream == null));
             return;
         }
 
-        Log("[NETWORK] SendMove x = " + position.x + ", y = " + position.y);
-        SendRaw(Protocol.MakeMovePacket(position.x, position.y));
+        Log("[NETWORK] SendInput dx = " + direction.x + ", dy = " + direction.y);
+        SendRaw(Protocol.MakeInputPacket(direction.x, direction.y));
     }
 
     public void SendChat(string message)
@@ -182,6 +183,17 @@ public class NetworkClient : MonoBehaviour
 
         localPlayerObject = Instantiate(localPlayerPrefab, new Vector3(loginPosition.x, loginPosition.y, 0.0f), Quaternion.identity);
         localPlayerObject.name = "LocalPlayer_" + myPlayerId;
+
+        // 서버 권위 이동: 내 위치는 서버가 보내주는 SC_MOVEOBJECT로 갱신된다. 초기 목표는 로그인 위치.
+        localInterpolator = localPlayerObject.GetComponent<LocalPlayerInterpolator>();
+        if (localInterpolator == null)
+        {
+            Debug.LogError("[NETWORK] LocalPlayer prefab has no LocalPlayerInterpolator component.");
+        }
+        else
+        {
+            localInterpolator.SetTargetPosition(loginPosition);
+        }
 
         // 2026-07-14: 로컬 플레이어는 로그인 후 생성되므로, 시네머신 카메라의 Follow를 이 시점에 연결한다.
         var virtualCamera = FindObjectOfType<Cinemachine.CinemachineVirtualCamera>();
@@ -406,13 +418,17 @@ public class NetworkClient : MonoBehaviour
         {
             Log("[NETWORK] Move packet. id = " + id + ", x = " + x + ", y = " + y);
 
+            Vector2 position = new Vector2(x, y);
+
+            // 서버 권위 이동: 내 위치도 서버가 소유. 내 캐릭터는 로컬 보간기로 따라간다(Option A).
             if (id == myPlayerId)
             {
-                Log("[NETWORK] Ignore my move packet. id = " + id);
+                if (localInterpolator != null)
+                {
+                    localInterpolator.SetTargetPosition(position);
+                }
                 return;
             }
-
-            Vector2 position = new Vector2(x, y);
 
             if (remotePlayers.TryGetValue(id, out RemotePlayer remotePlayer))
             {

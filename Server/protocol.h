@@ -16,7 +16,7 @@ enum class PACKET_TYPE : std::uint16_t
 {
     // Client -> Server
     CS_LOGIN = 1,
-    CS_MOVE,
+    CS_INPUT,     // 서버 권위 이동: 위치가 아니라 '입력 방향'을 보낸다.
     CS_LOGOUT,
     CS_CHAT,
 
@@ -42,13 +42,15 @@ struct CS_LOGIN_PACKET
     char name[NAME_SIZE];
 };
 
-struct CS_MOVE_PACKET
+// 서버 권위 이동: 클라는 자기 위치가 아니라 '이동 방향'만 보낸다(정규화, 정지=0,0).
+// 실제 위치 계산은 서버의 게임 틱 루프가 담당한다.
+struct CS_INPUT_PACKET
 {
     std::uint16_t size;
     PACKET_TYPE type;
 
-    float x;
-    float y;
+    float dx;
+    float dy;
 };
 
 struct CS_LOGOUT_PACKET

@@ -1,4 +1,4 @@
-// 2026-06-16: ����Ʈ �÷��̾ ĳ���� �̸� �߰�
+// 2026-06-16: ����Ʈ �÷��̾ ĳ���� �̸� �߰�
 using TMPro;
 using UnityEngine;
 
@@ -8,11 +8,14 @@ public class RemotePlayer : MonoBehaviour
     [SerializeField] private TMP_Text characterNameText;
 
     [Header("Interpolation")]
-    [SerializeField] private float moveSpeed = 10.0f;
-    [SerializeField] private float snapDistance = 2.0f;
-    [SerializeField] private float arriveDistance = 0.01f;
+    // 서버 브로드캐스트 주기(15Hz ≈ 0.066초)보다 살짝 길게. 다음 패킷 올 때까지 멈추지 않고 등속으로 채운다.
+    [SerializeField] private float interpDuration = 0.08f;
+    // 이 거리 이상 튀면 보간 대신 즉시 순간이동(텔레포트/디싱크 보정).
+    [SerializeField] private float snapDistance = 5.0f;
 
-    private Vector2 targetPosition;
+    private Vector3 fromPosition;   // 보간 시작점(패킷 받은 순간의 실제 위치)
+    private Vector3 toPosition;     // 보간 목표점(서버가 보낸 위치)
+    private float elapsed;
     private bool hasTarget;
 
     private void Awake()
@@ -25,7 +28,8 @@ public class RemotePlayer : MonoBehaviour
 
     private void Start()
     {
-        targetPosition = transform.position;
+        fromPosition = transform.position;
+        toPosition = transform.position;
         hasTarget = false;
     }
 
@@ -36,35 +40,31 @@ public class RemotePlayer : MonoBehaviour
             return;
         }
 
-        Vector2 currentPosition = transform.position;
-        float distance = Vector2.Distance(currentPosition, targetPosition);
+        elapsed += Time.deltaTime;
 
-        if (distance >= snapDistance)
-        {
-            transform.position = new Vector3(targetPosition.x, targetPosition.y, transform.position.z);
-            hasTarget = false;
-            return;
-        }
-
-        if (distance <= arriveDistance)
-        {
-            transform.position = new Vector3(targetPosition.x, targetPosition.y, transform.position.z);
-            hasTarget = false;
-            return;
-        }
-
-        Vector2 nextPosition = Vector2.MoveTowards(
-            currentPosition,
-            targetPosition,
-            moveSpeed * Time.deltaTime
-        );
-
-        transform.position = new Vector3(nextPosition.x, nextPosition.y, transform.position.z);
+        float t = Mathf.Clamp01(elapsed / interpDuration);
+        transform.position = Vector3.Lerp(fromPosition, toPosition, t);
     }
 
     public void SetTargetPosition(Vector2 position)
     {
-        targetPosition = position;
+        Vector3 next = new Vector3(position.x, position.y, transform.position.z);
+
+        // 너무 크게 튀면 보간 없이 즉시 이동(입장 직후/텔레포트/큰 지연 보정).
+        if (Vector2.Distance(transform.position, next) >= snapDistance)
+        {
+            transform.position = next;
+            fromPosition = next;
+            toPosition = next;
+            elapsed = 0.0f;
+            hasTarget = false;
+            return;
+        }
+
+        // 지금 있는 위치에서 새 목표까지 다시 보간 시작 (이전 보간 도중에 와도 이어짐).
+        fromPosition = transform.position;
+        toPosition = next;
+        elapsed = 0.0f;
         hasTarget = true;
     }
 

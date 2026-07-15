@@ -530,6 +530,7 @@ MonoBehaviour:
   gameSceneName: GameScene
   localPlayerPrefab: {fileID: 2746256444573331940, guid: 40e1e1f1df8fc464085f7cc6d1491935, type: 3}
   remotePlayerPrefab: {fileID: 2746256444573331940, guid: c3a050284b467144d80c4d7fb8705633, type: 3}
+  enableNetworkLog: 1
 --- !u!4 &307746950
 Transform:
   m_ObjectHideFlags: 0
@@ -539,7 +540,7 @@ Transform:
   m_GameObject: {fileID: 307746948}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 1013.0818, y: 554.71814, z: 8.197608}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []

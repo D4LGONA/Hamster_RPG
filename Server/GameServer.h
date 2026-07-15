@@ -27,8 +27,12 @@ private:
     bool ReadPacketInfo(const char* data, int bytes, std::uint16_t& packetSize, PACKET_TYPE& packetType);
 
     void ProcessLogin(std::uint32_t playerId, const CS_LOGIN_PACKET* packet);
-    void ProcessMove(std::uint32_t playerId, const CS_MOVE_PACKET* packet);
+    void ProcessInput(std::uint32_t playerId, const CS_INPUT_PACKET* packet);
     void ProcessChat(std::uint32_t playerId, const CS_CHAT_PACKET* packet);
+
+    // 서버 권위 이동: 고정 주기(15Hz)로 도는 게임 틱 루프.
+    void GameTickThread();
+    void UpdateWorld(float deltaSeconds);   // 한 틱: 위치 적분 + 시야 diff + 전송
 
     void SendStatUpdate(std::uint32_t playerId, const PlayerStats& stats);
     void SendPacket(std::uint32_t playerId, const void* packet, int size);
@@ -49,6 +53,9 @@ private:
     SOCKET listenSocket = INVALID_SOCKET;
 
     std::atomic<std::uint32_t> nextPlayerId{ 1 };
+
+    // 게임 틱 루프 종료 플래그.
+    std::atomic<bool> running{ true };
 
 
     // 추후 concurrency로 바꿀지 고민.

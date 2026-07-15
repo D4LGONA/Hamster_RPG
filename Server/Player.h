@@ -34,6 +34,11 @@ public:
     std::unordered_set<std::uint32_t>& GetViewList() { return viewList; }
     const std::unordered_set<std::uint32_t>& GetViewList() const { return viewList; }
 
+    // 서버 권위 이동용: 클라가 보낸 최신 입력 방향. 게임 틱 루프가 매 틱 읽어 위치를 적분한다.
+    float GetInputX() const { return inputX; }
+    float GetInputY() const { return inputY; }
+    void SetInput(float newInputX, float newInputY) { inputX = newInputX; inputY = newInputY; }
+
     void SetLoggedIn(bool newLoggedIn) { loggedIn = newLoggedIn; }
     void SetPosition(float newX, float newY) { x = newX; y = newY; }
     void SetName(const std::string& newName) { name = newName; }
@@ -50,4 +55,8 @@ private:
     PlayerStats stats;
 
     std::unordered_set<std::uint32_t> viewList;
+
+    // 최신 입력 방향(정규화). 서버 틱이 pos += input * moveSpeed * dt 로 적분.
+    float inputX = 0.0f;
+    float inputY = 0.0f;
 };

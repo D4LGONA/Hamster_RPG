@@ -14,6 +14,7 @@ GameObject:
   - component: {fileID: 3783353196370356361}
   - component: {fileID: 5351122676352071585}
   - component: {fileID: -4409877239581941901}
+  - component: {fileID: 8489433690828108076}
   m_Layer: 0
   m_Name: LocalPlayer
   m_TagString: Untagged
@@ -117,7 +118,7 @@ Rigidbody2D:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2746256444573331940}
-  m_BodyType: 0
+  m_BodyType: 1
   m_Simulated: 1
   m_UseFullKinematicContacts: 0
   m_UseAutoMass: 0
@@ -148,7 +149,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 24e738663bb316b45ba62230f6548db9, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  moveSpeed: 3
 --- !u!114 &-4409877239581941901
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -161,5 +161,18 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d551d5027e67c6d4397ddb03efe96834, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  sendInterval: 0.5
-  minMoveDistance: 0.01
+  inputChangeThreshold: 0.05
+--- !u!114 &8489433690828108076
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2746256444573331940}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 997cb63de34d23d4699b668c50ab05d5, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  interpDuration: 0.08
+  snapDistance: 5

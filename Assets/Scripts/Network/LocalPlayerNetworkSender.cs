@@ -1,17 +1,20 @@
 using UnityEngine;
 
+// 서버 권위 이동: 내 위치가 아니라 '입력 방향'을 서버로 보낸다.
+// TCP라 순서가 보장되므로, 입력이 바뀔 때만(누르기 시작/방향 전환/뗌) 보내면 충분하다.
+[RequireComponent(typeof(PlayerMovement))]
 public class LocalPlayerNetworkSender : MonoBehaviour
 {
     [Header("Network Send")]
-    [SerializeField] private float sendInterval = 0.5f;
-    [SerializeField] private float minMoveDistance = 0.01f;
+    // 방향이 이만큼이라도 바뀌면 새로 전송.
+    [SerializeField] private float inputChangeThreshold = 0.05f;
 
-    private float sendTimer;
-    private Vector2 lastSentPosition;
+    private PlayerMovement playerMovement;
+    private Vector2 lastSentInput = new Vector2(float.NaN, float.NaN);
 
-    private void Start()
+    private void Awake()
     {
-        lastSentPosition = transform.position;
+        playerMovement = GetComponent<PlayerMovement>();
     }
 
     private void Update()
@@ -31,25 +34,17 @@ public class LocalPlayerNetworkSender : MonoBehaviour
             return;
         }
 
-        sendTimer += Time.deltaTime;
+        Vector2 input = playerMovement.CurrentInput;
 
-        if (sendTimer < sendInterval)
+        // 이전에 보낸 입력과 거의 같으면 스킵(불필요한 패킷 억제).
+        float delta = Vector2.Distance(input, lastSentInput);
+
+        if (delta < inputChangeThreshold)
         {
             return;
         }
 
-        sendTimer = 0.0f;
-
-        Vector2 currentPosition = transform.position;
-
-        float moveDistance = Vector2.Distance(lastSentPosition, currentPosition);
-
-        if (moveDistance < minMoveDistance)
-        {
-            return;
-        }
-
-        NetworkClient.Instance.SendMove(currentPosition);
-        lastSentPosition = currentPosition;
+        NetworkClient.Instance.SendInput(input);
+        lastSentInput = input;
     }
 }

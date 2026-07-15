@@ -1,5 +1,5 @@
-// 2026-06-11: Protocol.cs ÆÄÀÏ Á¦ÀÛ. C++ ¼­¹ö protocol.h¿Í µ¿ÀÏÇÑ ÆĞÅ¶ ±ÔÄ¢À» »ç¿ëÇÑ´Ù.
-// 2026-06-16: CS_CHAT, SC_CHAT Ãß°¡, ¹®ÀÚ¿­ ÀÎÄÚµù UTF-8 Àû¿ë
+// 2026-06-11: Protocol.cs ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½. C++ ï¿½ï¿½ï¿½ï¿½ protocol.hï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Å¶ ï¿½ï¿½Ä¢ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
+// 2026-06-16: CS_CHAT, SC_CHAT ï¿½ß°ï¿½, ï¿½ï¿½ï¿½Ú¿ï¿½ ï¿½ï¿½ï¿½Úµï¿½ UTF-8 ï¿½ï¿½ï¿½ï¿½
 
 using System;
 using System.Collections.Generic;
@@ -20,7 +20,7 @@ public static class Protocol
     {
         // Client -> Server
         CS_LOGIN = 1,
-        CS_MOVE = 2,
+        CS_INPUT = 2,     // ì„œë²„ ê¶Œìœ„ ì´ë™: ìœ„ì¹˜ê°€ ì•„ë‹ˆë¼ 'ì…ë ¥ ë°©í–¥'ì„ ë³´ë‚¸ë‹¤.
         CS_LOGOUT = 3,
         CS_CHAT = 4,
 
@@ -85,14 +85,15 @@ public static class Protocol
         return packet;
     }
 
-    public static byte[] MakeMovePacket(float x, float y)
+    // ì„œë²„ ê¶Œìœ„ ì´ë™: ìœ„ì¹˜ê°€ ì•„ë‹ˆë¼ ì´ë™ ë°©í–¥(ì •ê·œí™”, ì •ì§€=0,0)ì„ ë³´ë‚¸ë‹¤.
+    public static byte[] MakeInputPacket(float dx, float dy)
     {
         byte[] packet = new byte[HeaderSize + sizeof(float) + sizeof(float)];
 
         int offset = 0;
-        WriteHeader(packet, ref offset, PacketType.CS_MOVE);
-        WriteFloat(packet, ref offset, x);
-        WriteFloat(packet, ref offset, y);
+        WriteHeader(packet, ref offset, PacketType.CS_INPUT);
+        WriteFloat(packet, ref offset, dx);
+        WriteFloat(packet, ref offset, dy);
 
         return packet;
     }

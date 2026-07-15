@@ -1,13 +1,8 @@
 using UnityEngine;
 
-[RequireComponent(typeof(Rigidbody2D))]
 [RequireComponent(typeof(Animator))]
 public class PlayerMovement : MonoBehaviour
 {
-    [Header("Movement")]
-    [SerializeField] private float moveSpeed = 3.0f;
-
-    private Rigidbody2D rb;
     private Animator animator;
 
     private Vector2 moveInput;
@@ -15,26 +10,27 @@ public class PlayerMovement : MonoBehaviour
 
     private string currentAnimation;
 
+    // 서버 권위 이동: 이 값은 LocalPlayerNetworkSender가 읽어 서버로 보낸다.
+    // 실제 위치 이동은 서버가 계산하고, 클라는 애니메이션만 로컬에서 처리한다.
+    public Vector2 CurrentInput { get { return moveInput; } }
+
     private void Awake()
     {
-        rb = GetComponent<Rigidbody2D>();
         animator = GetComponent<Animator>();
     }
 
     private void Update()
     {
+        // 채팅 중엔 입력을 0으로 (서버에 정지 전송 + 애니메이션 idle).
         if (ChatUI.Instance != null && ChatUI.Instance.IsChatting())
         {
+            moveInput = Vector2.zero;
+            UpdateAnimation();
             return;
         }
 
         ReadInput();
         UpdateAnimation();
-    }
-
-    private void FixedUpdate()
-    {
-        Move();
     }
 
     private void ReadInput()
@@ -48,12 +44,6 @@ public class PlayerMovement : MonoBehaviour
         {
             lastMoveDir = moveInput;
         }
-    }
-
-    private void Move()
-    {
-        Vector2 nextPosition = rb.position + moveInput * moveSpeed * Time.fixedDeltaTime;
-        rb.MovePosition(nextPosition);
     }
 
     private void UpdateAnimation()

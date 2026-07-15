@@ -29,6 +29,9 @@ void GameServer::Run()
 
     PostAccept();
 
+    // 서버 권위 이동: 게임 틱 루프 스레드. 위치 계산/시야 갱신은 오직 이 스레드에서만 한다.
+    std::thread tickThread(&GameServer::GameTickThread, this);
+
     std::vector<std::thread> workerThreads;
     const unsigned int threadCount = max(1u, std::thread::hardware_concurrency());
 
@@ -41,6 +44,9 @@ void GameServer::Run()
     {
         worker.join();
     }
+
+    running = false;
+    tickThread.join();
 }
 
 bool GameServer::Initialize()
@@ -284,10 +290,10 @@ void GameServer::ProcessPacket(std::uint32_t playerId, const char* data, int byt
             }
             break;
 
-        case PACKET_TYPE::CS_MOVE:
-            if (packetSize == sizeof(CS_MOVE_PACKET))
+        case PACKET_TYPE::CS_INPUT:
+            if (packetSize == sizeof(CS_INPUT_PACKET))
             {
-                ProcessMove(playerId, reinterpret_cast<const CS_MOVE_PACKET*>(packetData));
+                ProcessInput(playerId, reinterpret_cast<const CS_INPUT_PACKET*>(packetData));
             }
             break;
 
@@ -424,146 +430,207 @@ void GameServer::ProcessLogin(std::uint32_t playerId, const CS_LOGIN_PACKET* pac
         << ", view = " << spawnMeTargets.size() << std::endl;
 }
 
-void GameServer::ProcessMove(std::uint32_t playerId, const CS_MOVE_PACKET* packet)
+// 서버 권위 이동: 클라의 입력 방향만 저장한다. 실제 위치 계산은 게임 틱(UpdateWorld)에서.
+void GameServer::ProcessInput(std::uint32_t playerId, const CS_INPUT_PACKET* packet)
 {
-    SC_MOVE_PACKET movePacket{};
-    SC_SPAWN_PACKET selfSpawn{};
+    std::lock_guard<std::mutex> lock(playersLock);
 
-    std::vector<std::uint32_t> moveTargets;      // 계속 보이는 상대 -> 내 이동 전송
-    std::vector<SC_SPAWN_PACKET> spawnToMe;      // 새로 보이는 상대 -> 나에게 spawn
-    std::vector<std::uint32_t> spawnMeTargets;   // 나를 새로 보게 된 상대 -> 그들에게 내 spawn
-    std::vector<std::uint32_t> despawnTargets;   // 시야에서 서로 벗어난 상대들 (양방향 despawn)
+    auto iter = players.find(playerId);
+
+    if (iter == players.end())
+    {
+        return;
+    }
+
+    iter->second.SetInput(packet->dx, packet->dy);
+}
+
+// 고정 주기(15Hz)로 도는 게임 틱 루프. 위치/시야 갱신은 오직 이 스레드에서만 한다.
+void GameServer::GameTickThread()
+{
+    using clock = std::chrono::steady_clock;
+
+    constexpr int TICK_HZ = 15;
+    const auto tickInterval = std::chrono::nanoseconds(std::chrono::seconds(1)) / TICK_HZ;
+    const float dt = 1.0f / static_cast<float>(TICK_HZ);
+
+    auto nextTick = clock::now();
+
+    while (running)
+    {
+        nextTick += tickInterval;
+
+        UpdateWorld(dt);
+
+        std::this_thread::sleep_until(nextTick);
+    }
+}
+
+// 한 틱: (1) 입력 있는 플레이어 위치 적분 -> (2) 이동한 플레이어마다 시야 diff -> 락 풀고 전송.
+void GameServer::UpdateWorld(float deltaSeconds)
+{
+    std::vector<std::pair<std::uint32_t, SC_MOVE_PACKET>> moveSends;
+    std::vector<std::pair<std::uint32_t, SC_SPAWN_PACKET>> spawnSends;
+    std::vector<std::pair<std::uint32_t, SC_DESPAWN_PACKET>> despawnSends;
 
     {
         std::lock_guard<std::mutex> lock(playersLock);
 
-        auto iter = players.find(playerId);
+        // 1) 입력이 있는 플레이어의 위치를 적분한다.
+        std::vector<std::uint32_t> movers;
 
-        if (iter == players.end())
+        for (auto& [id, player] : players)
         {
-            return;
-        }
+            float ix = player.GetInputX();
+            float iy = player.GetInputY();
 
-        Player& me = iter->second;
-
-        float oldX = me.GetX();
-        float oldY = me.GetY();
-        float newX = packet->x;
-        float newY = packet->y;
-
-        me.SetPosition(newX, newY);
-        sectorGrid.Move(playerId, oldX, oldY, newX, newY);
-
-        selfSpawn = MakeSpawnPacket(me);
-
-        movePacket.size = sizeof(SC_MOVE_PACKET);
-        movePacket.type = PACKET_TYPE::SC_MOVEOBJECT;
-        movePacket.id = playerId;
-        movePacket.x = newX;
-        movePacket.y = newY;
-
-        // 이동 후 새 시야 계산 (주변 3x3 섹터 후보 -> 거리 판정)
-        std::vector<std::uint32_t> nearby;
-        sectorGrid.GatherNearby(newX, newY, nearby);
-
-        std::unordered_set<std::uint32_t> newView;
-
-        for (std::uint32_t otherId : nearby)
-        {
-            if (otherId == playerId)
+            if (ix == 0.0f && iy == 0.0f)
             {
                 continue;
             }
 
-            auto otherIter = players.find(otherId);
+            float speed = player.GetStats().moveSpeed;
 
-            if (otherIter == players.end())
+            float oldX = player.GetX();
+            float oldY = player.GetY();
+
+            float newX = oldX + ix * speed * deltaSeconds;
+            float newY = oldY + iy * speed * deltaSeconds;
+
+            // 월드 경계 clamp
+            if (newX < WORLD_MIN) { newX = WORLD_MIN; }
+            if (newX > WORLD_MAX) { newX = WORLD_MAX; }
+            if (newY < WORLD_MIN) { newY = WORLD_MIN; }
+            if (newY > WORLD_MAX) { newY = WORLD_MAX; }
+
+            if (newX == oldX && newY == oldY)
+            {
+                continue;   // 경계에 눌려 실제 이동 없음
+            }
+
+            player.SetPosition(newX, newY);
+            sectorGrid.Move(id, oldX, oldY, newX, newY);
+            movers.push_back(id);
+        }
+
+        // 2) 이동한 플레이어마다 시야 diff -> 보낼 패킷 수집.
+        for (std::uint32_t moverId : movers)
+        {
+            auto meIter = players.find(moverId);
+
+            if (meIter == players.end())
             {
                 continue;
             }
 
-            if (InViewRange(me, otherIter->second))
+            Player& me = meIter->second;
+
+            SC_MOVE_PACKET movePacket{};
+            movePacket.size = sizeof(SC_MOVE_PACKET);
+            movePacket.type = PACKET_TYPE::SC_MOVEOBJECT;
+            movePacket.id = moverId;
+            movePacket.x = me.GetX();
+            movePacket.y = me.GetY();
+
+            SC_SPAWN_PACKET selfSpawn = MakeSpawnPacket(me);
+
+            // 옵션 A: 내 위치도 서버가 소유하므로, 나 자신에게도 내 이동을 보낸다.
+            moveSends.emplace_back(moverId, movePacket);
+
+            // 새 시야 계산 (주변 3x3 섹터 후보 -> 거리 판정)
+            std::vector<std::uint32_t> nearby;
+            sectorGrid.GatherNearby(me.GetX(), me.GetY(), nearby);
+
+            std::unordered_set<std::uint32_t> newView;
+
+            for (std::uint32_t otherId : nearby)
             {
-                newView.insert(otherId);
+                if (otherId == moverId)
+                {
+                    continue;
+                }
+
+                auto otherIter = players.find(otherId);
+
+                if (otherIter == players.end())
+                {
+                    continue;
+                }
+
+                if (InViewRange(me, otherIter->second))
+                {
+                    newView.insert(otherId);
+                }
             }
-        }
 
-        std::unordered_set<std::uint32_t>& oldView = me.GetViewList();
+            std::unordered_set<std::uint32_t>& oldView = me.GetViewList();
 
-        // 새 시야 순회: 새로 들어온 사람은 spawn, 계속 있는 사람은 move
-        for (std::uint32_t otherId : newView)
-        {
-            if (oldView.find(otherId) == oldView.end())
+            // 새로 진입 -> 서로 spawn, 계속 보임 -> 내 이동 전송
+            for (std::uint32_t otherId : newView)
             {
-                // 새로 시야에 진입 -> 서로 spawn
+                if (oldView.find(otherId) == oldView.end())
+                {
+                    auto otherIter = players.find(otherId);
+
+                    if (otherIter != players.end())
+                    {
+                        otherIter->second.GetViewList().insert(moverId);
+                        spawnSends.emplace_back(moverId, MakeSpawnPacket(otherIter->second)); // 상대 -> 나
+                        spawnSends.emplace_back(otherId, selfSpawn);                          // 나 -> 상대
+                    }
+                }
+                else
+                {
+                    moveSends.emplace_back(otherId, movePacket);   // 내 이동 -> 계속 보는 상대
+                }
+            }
+
+            // 시야에서 이탈 -> 서로 despawn
+            for (std::uint32_t otherId : oldView)
+            {
+                if (newView.find(otherId) != newView.end())
+                {
+                    continue;
+                }
+
                 auto otherIter = players.find(otherId);
 
                 if (otherIter != players.end())
                 {
-                    otherIter->second.GetViewList().insert(playerId);
-                    spawnToMe.push_back(MakeSpawnPacket(otherIter->second));
-                    spawnMeTargets.push_back(otherId);
+                    otherIter->second.GetViewList().erase(moverId);
                 }
+
+                SC_DESPAWN_PACKET despawnMe{};
+                despawnMe.size = sizeof(SC_DESPAWN_PACKET);
+                despawnMe.type = PACKET_TYPE::SC_DESPAWN;
+                despawnMe.id = moverId;
+                despawnSends.emplace_back(otherId, despawnMe);     // 상대에게 나 despawn
+
+                SC_DESPAWN_PACKET despawnOther{};
+                despawnOther.size = sizeof(SC_DESPAWN_PACKET);
+                despawnOther.type = PACKET_TYPE::SC_DESPAWN;
+                despawnOther.id = otherId;
+                despawnSends.emplace_back(moverId, despawnOther);  // 나에게 상대 despawn
             }
-            else
-            {
-                // 계속 보이는 중 -> 내 이동을 상대에게
-                moveTargets.push_back(otherId);
-            }
+
+            oldView = std::move(newView);   // 내 뷰리스트 갱신
         }
-
-        // 예전 시야엔 있었는데 새 시야엔 없는 사람 -> 서로 despawn
-        for (std::uint32_t otherId : oldView)
-        {
-            if (newView.find(otherId) != newView.end())
-            {
-                continue;
-            }
-
-            auto otherIter = players.find(otherId);
-
-            if (otherIter != players.end())
-            {
-                otherIter->second.GetViewList().erase(playerId);
-            }
-
-            despawnTargets.push_back(otherId);
-        }
-
-        oldView = std::move(newView);   // 내 뷰리스트 갱신
     }
 
-    // ---- playersLock 해제 후 전송 ----
-    for (std::uint32_t targetId : moveTargets)
+    // ---- playersLock 해제 후 전송 (spawn -> move -> despawn 순서로 클라 처리 안전하게) ----
+    for (auto& [targetId, packet] : spawnSends)
     {
-        SendPacket(targetId, &movePacket, movePacket.size);
+        SendPacket(targetId, &packet, packet.size);
     }
 
-    for (const SC_SPAWN_PACKET& spawn : spawnToMe)
+    for (auto& [targetId, packet] : moveSends)
     {
-        SendPacket(playerId, &spawn, spawn.size);
+        SendPacket(targetId, &packet, packet.size);
     }
 
-    for (std::uint32_t targetId : spawnMeTargets)
+    for (auto& [targetId, packet] : despawnSends)
     {
-        SendPacket(targetId, &selfSpawn, selfSpawn.size);
-    }
-
-    for (std::uint32_t otherId : despawnTargets)
-    {
-        // 상대에게 "나" despawn
-        SC_DESPAWN_PACKET despawnMe{};
-        despawnMe.size = sizeof(SC_DESPAWN_PACKET);
-        despawnMe.type = PACKET_TYPE::SC_DESPAWN;
-        despawnMe.id = playerId;
-        SendPacket(otherId, &despawnMe, despawnMe.size);
-
-        // 나에게 "상대" despawn
-        SC_DESPAWN_PACKET despawnOther{};
-        despawnOther.size = sizeof(SC_DESPAWN_PACKET);
-        despawnOther.type = PACKET_TYPE::SC_DESPAWN;
-        despawnOther.id = otherId;
-        SendPacket(playerId, &despawnOther, despawnOther.size);
+        SendPacket(targetId, &packet, packet.size);
     }
 }
 
