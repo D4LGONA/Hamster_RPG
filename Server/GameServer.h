@@ -8,6 +8,7 @@
 #include "NetworkTypes.h"
 #include "Session.h"
 #include "Player.h"
+#include "Monster.h"
 #include "SectorGrid.h"
 
 class GameServer
@@ -38,9 +39,16 @@ private:
     void SendPacket(std::uint32_t playerId, const void* packet, int size);
     void BroadcastPacket(const void* packet, int size, std::uint32_t exceptId = 0);
 
-    // 시야처리(AOI) 헬퍼. 아래 두 함수는 playersLock을 잡은 상태에서만 호출한다.
+    // 시야처리(AOI) 헬퍼. 아래 함수들은 playersLock을 잡은 상태에서만 호출한다.
     SC_SPAWN_PACKET MakeSpawnPacket(const Player& player);
+    SC_SPAWN_PACKET MakeSpawnPacket(const Monster& monster);
     static bool InViewRange(const Player& a, const Player& b);
+    static bool InRange(float ax, float ay, float bx, float by);
+
+    // 몬스터: 별도 맵으로 관리하되 섹터그리드/시야엔 함께 태운다.
+    static bool IsMonsterId(std::uint32_t id) { return id >= MONSTER_ID_BASE; }
+    bool GetEntityPosition(std::uint32_t id, float& x, float& y);   // player/monster 공통 위치 조회
+    void SpawnInitialMonsters();
 
     void DisconnectPlayer(std::uint32_t playerId);
 
@@ -65,6 +73,12 @@ private:
     std::mutex playersLock;
     std::unordered_map<std::uint32_t, Player> players;
 
-    // 섹터 격자도 playersLock으로 함께 보호한다(플레이어 위치/뷰리스트와 항상 같이 바뀌므로).
+    // 몬스터. playersLock으로 players/sectorGrid와 함께 보호한다.
+    // id가 MONSTER_ID_BASE 이상이면 몬스터(플레이어 id와 겹치지 않게 분리).
+    static constexpr std::uint32_t MONSTER_ID_BASE = 1000000;
+    std::uint32_t nextMonsterId = MONSTER_ID_BASE;
+    std::unordered_map<std::uint32_t, Monster> monsters;
+
+    // 섹터 격자도 playersLock으로 함께 보호한다(위치/뷰리스트와 항상 같이 바뀌므로). 몬스터도 여기 들어간다.
     SectorGrid sectorGrid;
 };

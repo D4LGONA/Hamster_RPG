@@ -22,6 +22,7 @@ public class NetworkClient : MonoBehaviour
     [Header("Prefab")]
     [SerializeField] private GameObject localPlayerPrefab;
     [SerializeField] private GameObject remotePlayerPrefab;
+    [SerializeField] private GameObject monsterPrefab;
 
     [Header("Debug")]
     [SerializeField] private bool enableNetworkLog = true;
@@ -51,6 +52,7 @@ public class NetworkClient : MonoBehaviour
     private readonly ConcurrentQueue<Action> mainThreadActions = new ConcurrentQueue<Action>();
 
     private readonly Dictionary<uint, RemotePlayer> remotePlayers = new Dictionary<uint, RemotePlayer>();
+    private readonly Dictionary<uint, MonsterEntity> monsters = new Dictionary<uint, MonsterEntity>();
     private readonly List<SpawnInfo> pendingSpawns = new List<SpawnInfo>();
     private readonly Dictionary<uint, Vector2> pendingMoves = new Dictionary<uint, Vector2>();
 
@@ -59,6 +61,7 @@ public class NetworkClient : MonoBehaviour
         public uint id;
         public string name;
         public Vector2 position;
+        public byte entityType;
     }
 
     private void Awake()
@@ -363,6 +366,7 @@ public class NetworkClient : MonoBehaviour
         string name = Protocol.ReadFixedString(packet, ref offset, Protocol.NameSize);
         float x = Protocol.ReadFloat(packet, ref offset);
         float y = Protocol.ReadFloat(packet, ref offset);
+        byte entityType = Protocol.ReadByte(packet, ref offset);
 
         mainThreadActions.Enqueue(() =>
         {
@@ -373,16 +377,23 @@ public class NetworkClient : MonoBehaviour
             }
 
             Vector2 position = new Vector2(x, y);
-            Log("[NETWORK] Spawn packet. id = " + id + ", name = " + name + ", x = " + x + ", y = " + y);
+            Log("[NETWORK] Spawn packet. id = " + id + ", type = " + entityType + ", x = " + x + ", y = " + y);
 
             if (SceneManager.GetActiveScene().name != gameSceneName)
             {
-                AddPendingSpawn(id, name, position);
+                AddPendingSpawn(id, name, position, entityType);
                 Log("[NETWORK] Add pending spawn. id = " + id);
                 return;
             }
 
-            SpawnRemotePlayer(id, name, position);
+            if (entityType == Protocol.EntityMonster)
+            {
+                SpawnMonster(id, position);
+            }
+            else
+            {
+                SpawnRemotePlayer(id, name, position);
+            }
         });
     }
 
@@ -402,7 +413,13 @@ public class NetworkClient : MonoBehaviour
                 remotePlayers.Remove(id);
             }
 
-            Log("[NETWORK] Despawn playerId = " + id);
+            if (monsters.TryGetValue(id, out MonsterEntity monster))
+            {
+                Destroy(monster.gameObject);
+                monsters.Remove(id);
+            }
+
+            Log("[NETWORK] Despawn id = " + id);
         });
     }
 
@@ -434,6 +451,13 @@ public class NetworkClient : MonoBehaviour
             {
                 remotePlayer.SetTargetPosition(position);
                 Log("[NETWORK] Apply remote move. id = " + id);
+                return;
+            }
+
+            if (monsters.TryGetValue(id, out MonsterEntity monster))
+            {
+                monster.SetTargetPosition(position);
+                Log("[NETWORK] Apply monster move. id = " + id);
                 return;
             }
 
@@ -519,7 +543,45 @@ public class NetworkClient : MonoBehaviour
         Log("[NETWORK] Spawn remote player. id = " + id + ", name = " + name + ", x = " + position.x + ", y = " + position.y);
     }
 
-    private void AddPendingSpawn(uint id, string name, Vector2 position)
+    private void SpawnMonster(uint id, Vector2 position)
+    {
+        if (monsters.ContainsKey(id))
+        {
+            Log("[NETWORK] Monster already exists. id = " + id);
+            return;
+        }
+
+        if (monsterPrefab == null)
+        {
+            Debug.LogError("[NETWORK] monsterPrefab is null");
+            return;
+        }
+
+        GameObject obj = Instantiate(monsterPrefab, new Vector3(position.x, position.y, 0.0f), Quaternion.identity);
+        obj.name = "Monster_" + id;
+
+        MonsterEntity monster = obj.GetComponent<MonsterEntity>();
+
+        if (monster == null)
+        {
+            Debug.LogError("[NETWORK] Monster prefab has no MonsterEntity component. id = " + id);
+            Destroy(obj);
+            return;
+        }
+
+        monster.SetTargetPosition(position);
+        monsters.Add(id, monster);
+
+        if (pendingMoves.TryGetValue(id, out Vector2 pendingPosition))
+        {
+            monster.SetTargetPosition(pendingPosition);
+            pendingMoves.Remove(id);
+        }
+
+        Log("[NETWORK] Spawn monster. id = " + id + ", x = " + position.x + ", y = " + position.y);
+    }
+
+    private void AddPendingSpawn(uint id, string name, Vector2 position, byte entityType)
     {
         for (int i = 0; i < pendingSpawns.Count; ++i)
         {
@@ -529,6 +591,7 @@ public class NetworkClient : MonoBehaviour
             updatedSpawn.id = id;
             updatedSpawn.name = name;
             updatedSpawn.position = position;
+            updatedSpawn.entityType = entityType;
             pendingSpawns[i] = updatedSpawn;
             return;
         }
@@ -537,6 +600,7 @@ public class NetworkClient : MonoBehaviour
         spawnInfo.id = id;
         spawnInfo.name = name;
         spawnInfo.position = position;
+        spawnInfo.entityType = entityType;
         pendingSpawns.Add(spawnInfo);
     }
 
@@ -555,7 +619,15 @@ public class NetworkClient : MonoBehaviour
         for (int i = 0; i < pendingSpawns.Count; ++i)
         {
             SpawnInfo spawnInfo = pendingSpawns[i];
-            SpawnRemotePlayer(spawnInfo.id, spawnInfo.name, spawnInfo.position);
+
+            if (spawnInfo.entityType == Protocol.EntityMonster)
+            {
+                SpawnMonster(spawnInfo.id, spawnInfo.position);
+            }
+            else
+            {
+                SpawnRemotePlayer(spawnInfo.id, spawnInfo.name, spawnInfo.position);
+            }
         }
 
         pendingSpawns.Clear();
@@ -564,11 +636,18 @@ public class NetworkClient : MonoBehaviour
 
         foreach (KeyValuePair<uint, Vector2> pair in pendingMoves)
         {
-            if (remotePlayers.TryGetValue(pair.Key, out RemotePlayer remotePlayer) == false) continue;
+            if (remotePlayers.TryGetValue(pair.Key, out RemotePlayer remotePlayer))
+            {
+                remotePlayer.SetTargetPosition(pair.Value);
+                appliedMoveIds.Add(pair.Key);
+                continue;
+            }
 
-            remotePlayer.SetTargetPosition(pair.Value);
-            appliedMoveIds.Add(pair.Key);
-            Log("[NETWORK] Flush pending move. id = " + pair.Key + ", x = " + pair.Value.x + ", y = " + pair.Value.y);
+            if (monsters.TryGetValue(pair.Key, out MonsterEntity monster))
+            {
+                monster.SetTargetPosition(pair.Value);
+                appliedMoveIds.Add(pair.Key);
+            }
         }
 
         for (int i = 0; i < appliedMoveIds.Count; ++i) pendingMoves.Remove(appliedMoveIds[i]);

@@ -29,6 +29,9 @@ void GameServer::Run()
 
     PostAccept();
 
+    // 월드에 몬스터 배치. (아직 워커/틱 스레드가 없어 락 불필요)
+    SpawnInitialMonsters();
+
     // 서버 권위 이동: 게임 틱 루프 스레드. 위치 계산/시야 갱신은 오직 이 스레드에서만 한다.
     std::thread tickThread(&GameServer::GameTickThread, this);
 
@@ -322,15 +325,74 @@ SC_SPAWN_PACKET GameServer::MakeSpawnPacket(const Player& player)
     strncpy_s(spawn.name, sizeof(spawn.name), player.GetName().c_str(), _TRUNCATE);
     spawn.x = player.GetX();
     spawn.y = player.GetY();
+    spawn.entityType = ENTITY_PLAYER;
     return spawn;
 }
 
-// 두 플레이어가 서로 시야 범위 안인지. sqrt 없이 제곱 거리로 비교(비용 절약).
+SC_SPAWN_PACKET GameServer::MakeSpawnPacket(const Monster& monster)
+{
+    SC_SPAWN_PACKET spawn{};
+    spawn.size = sizeof(SC_SPAWN_PACKET);
+    spawn.type = PACKET_TYPE::SC_SPAWN;
+    spawn.id = monster.GetId();
+    strncpy_s(spawn.name, sizeof(spawn.name), "Monster", _TRUNCATE);
+    spawn.x = monster.GetX();
+    spawn.y = monster.GetY();
+    spawn.entityType = ENTITY_MONSTER;
+    return spawn;
+}
+
+// 두 점이 시야 범위 안인지. sqrt 없이 제곱 거리로 비교(비용 절약).
+bool GameServer::InRange(float ax, float ay, float bx, float by)
+{
+    float dx = ax - bx;
+    float dy = ay - by;
+    return (dx * dx + dy * dy) <= (VIEW_RANGE * VIEW_RANGE);
+}
+
 bool GameServer::InViewRange(const Player& a, const Player& b)
 {
-    float dx = a.GetX() - b.GetX();
-    float dy = a.GetY() - b.GetY();
-    return (dx * dx + dy * dy) <= (VIEW_RANGE * VIEW_RANGE);
+    return InRange(a.GetX(), a.GetY(), b.GetX(), b.GetY());
+}
+
+// player/monster 공통 위치 조회. id로 종류를 구분한다.
+bool GameServer::GetEntityPosition(std::uint32_t id, float& x, float& y)
+{
+    if (IsMonsterId(id))
+    {
+        auto iter = monsters.find(id);
+        if (iter == monsters.end()) { return false; }
+        x = iter->second.GetX();
+        y = iter->second.GetY();
+        return true;
+    }
+
+    auto iter = players.find(id);
+    if (iter == players.end()) { return false; }
+    x = iter->second.GetX();
+    y = iter->second.GetY();
+    return true;
+}
+
+// 서버 시작 시 월드에 몬스터를 배치한다. 아직 다른 스레드가 없을 때 호출(락 불필요).
+void GameServer::SpawnInitialMonsters()
+{
+    const float positions[][2] = {
+        {  6.0f,  0.0f },
+        { -6.0f,  0.0f },
+        {  0.0f,  6.0f },
+        {  0.0f, -6.0f },
+        {  9.0f,  9.0f },
+    };
+
+    for (const auto& pos : positions)
+    {
+        std::uint32_t id = nextMonsterId++;
+        monsters.emplace(id, Monster{ id, pos[0], pos[1], 30 });
+        sectorGrid.Add(id, pos[0], pos[1]);
+    }
+
+    std::cout << "[MONSTER] spawned " << monsters.size() << " monsters" << std::endl;
 }
 
 void GameServer::ProcessLogin(std::uint32_t playerId, const CS_LOGIN_PACKET* packet)
@@ -376,6 +438,29 @@ void GameServer::ProcessLogin(std::uint32_t playerId, const CS_LOGIN_PACKET* pac
         {
             if (otherId == playerId)
             {
+                continue;
+            }
+
+            // 몬스터: 내 화면에만 spawn (몬스터는 클라가 없어 reciprocal 없음)
+            if (IsMonsterId(otherId))
+            {
+                auto monsterIter = monsters.find(otherId);
+
+                if (monsterIter == monsters.end())
+                {
+                    continue;
+                }
+
+                Monster& monster = monsterIter->second;
+
+                if (InRange(self.GetX(), self.GetY(), monster.GetX(), monster.GetY()) == false)
+                {
+                    continue;
+                }
+
+                self.GetViewList().insert(otherId);
+                monster.GetWatchers().insert(playerId);
+                spawnToMe.push_back(MakeSpawnPacket(monster));   // 몬스터 -> 나
                 continue;
             }
 
@@ -550,25 +635,42 @@ void GameServer::UpdateWorld(float deltaSeconds)
                     continue;
                 }
 
-                auto otherIter = players.find(otherId);
-
-                if (otherIter == players.end())
+                float ox, oy;
+                if (GetEntityPosition(otherId, ox, oy) == false)
                 {
                     continue;
                 }
 
-                if (InViewRange(me, otherIter->second))
+                if (InRange(me.GetX(), me.GetY(), ox, oy))
                 {
-                    newView.insert(otherId);
+                    newView.insert(otherId);   // 플레이어 + 몬스터 모두 포함
                 }
             }
 
             std::unordered_set<std::uint32_t>& oldView = me.GetViewList();
 
-            // 새로 진입 -> 서로 spawn, 계속 보임 -> 내 이동 전송
+            // 새로 진입 -> spawn, 계속 보임 -> 내 이동 전송
             for (std::uint32_t otherId : newView)
             {
-                if (oldView.find(otherId) == oldView.end())
+                bool isNew = (oldView.find(otherId) == oldView.end());
+
+                if (IsMonsterId(otherId))
+                {
+                    // 상대가 몬스터: 내 화면에만 spawn. 몬스터가 안 움직이면 계속 보임엔 보낼 게 없다.
+                    if (isNew)
+                    {
+                        auto monsterIter = monsters.find(otherId);
+
+                        if (monsterIter != monsters.end())
+                        {
+                            monsterIter->second.GetWatchers().insert(moverId);
+                            spawnSends.emplace_back(moverId, MakeSpawnPacket(monsterIter->second)); // 몬스터 -> 나
+                        }
+                    }
+                    continue;
+                }
+
+                if (isNew)
                 {
                     auto otherIter = players.find(otherId);
 
@@ -585,11 +687,30 @@ void GameServer::UpdateWorld(float deltaSeconds)
                 }
             }
 
-            // 시야에서 이탈 -> 서로 despawn
+            // 시야에서 이탈 -> despawn
             for (std::uint32_t otherId : oldView)
             {
                 if (newView.find(otherId) != newView.end())
                 {
+                    continue;
+                }
+
+                SC_DESPAWN_PACKET despawnOther{};
+                despawnOther.size = sizeof(SC_DESPAWN_PACKET);
+                despawnOther.type = PACKET_TYPE::SC_DESPAWN;
+                despawnOther.id = otherId;
+
+                if (IsMonsterId(otherId))
+                {
+                    // 몬스터: 내 화면에서만 despawn. 몬스터의 watchers에서 나를 제거.
+                    auto monsterIter = monsters.find(otherId);
+
+                    if (monsterIter != monsters.end())
+                    {
+                        monsterIter->second.GetWatchers().erase(moverId);
+                    }
+
+                    despawnSends.emplace_back(moverId, despawnOther);  // 나에게 몬스터 despawn
                     continue;
                 }
 
@@ -605,11 +726,6 @@ void GameServer::UpdateWorld(float deltaSeconds)
                 despawnMe.type = PACKET_TYPE::SC_DESPAWN;
                 despawnMe.id = moverId;
                 despawnSends.emplace_back(otherId, despawnMe);     // 상대에게 나 despawn
-
-                SC_DESPAWN_PACKET despawnOther{};
-                despawnOther.size = sizeof(SC_DESPAWN_PACKET);
-                despawnOther.type = PACKET_TYPE::SC_DESPAWN;
-                despawnOther.id = otherId;
                 despawnSends.emplace_back(moverId, despawnOther);  // 나에게 상대 despawn
             }
 
@@ -755,9 +871,22 @@ void GameServer::DisconnectPlayer(std::uint32_t playerId)
             // 섹터 격자에서 제거
             sectorGrid.Remove(playerId, me.GetX(), me.GetY());
 
-            // 나를 보던 사람들의 뷰리스트에서 나를 지우고, despawn 대상으로 수집
+            // 내가 보던 것들 정리. 몬스터면 그 watchers에서 나를 제거(despawn 불필요, 내가 나가니까).
+            // 플레이어면 그쪽 뷰리스트에서 나를 지우고 despawn 대상으로 수집.
             for (std::uint32_t otherId : me.GetViewList())
             {
+                if (IsMonsterId(otherId))
+                {
+                    auto monsterIter = monsters.find(otherId);
+
+                    if (monsterIter != monsters.end())
+                    {
+                        monsterIter->second.GetWatchers().erase(playerId);
+                    }
+
+                    continue;
+                }
+
                 auto otherIter = players.find(otherId);
 
                 if (otherIter != players.end())

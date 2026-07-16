@@ -117,7 +117,7 @@ Rigidbody2D:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2746256444573331940}
-  m_BodyType: 0
+  m_BodyType: 1
   m_Simulated: 1
   m_UseFullKinematicContacts: 0
   m_UseAutoMass: 0
@@ -151,6 +151,8 @@ MonoBehaviour:
   characterNameText: {fileID: 2103266410342868410}
   interpDuration: 0.08
   snapDistance: 5
+  animator: {fileID: 0}
+  moveThresholdSqr: 0.0000001
 --- !u!1 &4097452037817899937
 GameObject:
   m_ObjectHideFlags: 0

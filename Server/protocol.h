@@ -11,6 +11,10 @@ constexpr int NAME_SIZE = 20;
 constexpr int MAX_USER = 10000;
 constexpr int CHAT_SIZE = 256;
 
+// spawn 패킷의 엔티티 종류. 클라가 어떤 프리팹으로 스폰할지 구분한다.
+constexpr std::uint8_t ENTITY_PLAYER = 0;
+constexpr std::uint8_t ENTITY_MONSTER = 1;
+
 
 enum class PACKET_TYPE : std::uint16_t
 {
@@ -92,6 +96,8 @@ struct SC_SPAWN_PACKET
 
     float x;
     float y;
+
+    std::uint8_t entityType;   // ENTITY_PLAYER / ENTITY_MONSTER
 };
 
 struct SC_DESPAWN_PACKET

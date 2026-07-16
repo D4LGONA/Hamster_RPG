@@ -14,6 +14,10 @@ public static class Protocol
     public const int HeaderSize = 4;
     public const int ChatSize = 256;
 
+    // SC_SPAWN의 엔티티 종류 (서버 protocol.h와 일치).
+    public const byte EntityPlayer = 0;
+    public const byte EntityMonster = 1;
+
     private static readonly Encoding PacketEncoding = new UTF8Encoding(false);
 
     public enum PacketType : ushort
