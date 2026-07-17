@@ -19,6 +19,16 @@ public:
 
     void Run();
 
+    // 부하 테스트 전용. 로그인 위치를 원점 고정이 아니라 ±halfExtent 안 랜덤으로 흩어놓는다.
+    // 0(기본)이면 평소대로 전원 원점 스폰. Run() 전에 호출할 것.
+    // 봇을 전부 원점에 겹쳐놓으면 서로가 서로의 시야에 들어와 AOI가 일할 여지가 없어지므로,
+    // 시야처리가 실제로 트래픽을 줄여주는지 재려면 이게 필요하다.
+    void SetRandomSpawn(float halfExtent) { randomSpawnExtent = halfExtent; }
+
+    // 틱의 각 단계가 몇 ms 먹는지 주기적으로 찍는다. 뭘 워커로 분리할지 정하려면
+    // 추측이 아니라 이 숫자를 보고 골라야 한다. Run() 전에 호출할 것.
+    void SetProfile(bool on) { profileEnabled = on; }
+
 private:
     bool Initialize();
     void PostAccept();
@@ -44,11 +54,28 @@ private:
     SC_SPAWN_PACKET MakeSpawnPacket(const Monster& monster);
     static bool InViewRange(const Player& a, const Player& b);
     static bool InRange(float ax, float ay, float bx, float by);
+    static bool WithinRadius(float ax, float ay, float bx, float by, float radius);   // 반경 지정 거리 비교(sqrt 없이)
 
     // 몬스터: 별도 맵으로 관리하되 섹터그리드/시야엔 함께 태운다.
     static bool IsMonsterId(std::uint32_t id) { return id >= MONSTER_ID_BASE; }
     bool GetEntityPosition(std::uint32_t id, float& x, float& y);   // player/monster 공통 위치 조회
     void SpawnInitialMonsters();
+
+    // 몬스터 AI. 아래 전부 게임 틱 스레드에서 playersLock을 잡은 상태로만 호출한다.
+    void UpdateMonsters(float deltaSeconds, std::vector<std::uint32_t>& movers);   // 이동 -> 움직인 몬스터 수집
+
+    // 행동 타입별 이동. 이번 틱의 목표 위치를 outX/outY에 넣고, 실제로 움직였으면 true.
+    // 경계 clamp / 섹터그리드 갱신 / movers 수집은 호출부(UpdateMonsters)가 공통으로 처리하므로
+    // 여기선 '어디로 갈지'만 정하면 된다.
+    bool StepWander(Monster& monster, float deltaSeconds, float& outX, float& outY);
+    bool StepPatrol(Monster& monster, float deltaSeconds, float& outX, float& outY);
+    bool StepChase(Monster& monster, float deltaSeconds, float& outX, float& outY);
+
+    void PickWanderDirection(Monster& monster);   // 새 방향(또는 정지) + 다음 전환 시간
+
+    void PickSpawnPosition(float& x, float& y);   // 로그인 스폰 위치. playersLock을 잡은 상태에서 호출할 것.
+
+    void ReportTickProfile();   // 누적된 틱 프로파일을 찍고 리셋. 틱 스레드에서만 호출.
 
     void DisconnectPlayer(std::uint32_t playerId);
 
@@ -78,6 +105,62 @@ private:
     static constexpr std::uint32_t MONSTER_ID_BASE = 1000000;
     std::uint32_t nextMonsterId = MONSTER_ID_BASE;
     std::unordered_map<std::uint32_t, Monster> monsters;
+
+    // 몬스터 AI 설정.
+    static constexpr float MONSTER_MOVE_SPEED = 2.0f;      // 플레이어(5.0)보다 느리게
+    static constexpr float MONSTER_LEASH_RADIUS = 5.0f;    // 스폰 지점에서 이 거리 벗어나면 되돌아온다
+    static constexpr float MONSTER_IDLE_CHANCE = 0.5f;     // 방향 전환 시 이 확률로 잠깐 쉰다
+    static constexpr float MONSTER_WANDER_MIN_SEC = 1.0f;  // 한 방향(또는 정지)을 유지하는 시간
+    static constexpr float MONSTER_WANDER_MAX_SEC = 3.0f;
+
+    // 목표 지점에 이만큼 붙으면 도착으로 친다. 0으로 두면 부동소수점 오차 때문에
+    // 도착 지점에서 미세하게 떨면서 매 틱 move 패킷을 쏘게 된다.
+    static constexpr float MONSTER_ARRIVE_DIST = 0.1f;
+
+    // 순찰 경로: 스폰 지점 기준 상대좌표. 순서대로 돌고 마지막에서 처음으로 순환한다.
+    // 첫 점이 (0,0)이라 스폰 지점 자체가 경로의 한 모서리가 된다.
+    struct PatrolPoint { float x; float y; };
+    static constexpr PatrolPoint MONSTER_PATROL_PATH[] = {
+        { 0.0f, 0.0f },
+        { 6.0f, 0.0f },
+        { 6.0f, 6.0f },
+        { 0.0f, 6.0f },
+    };
+    static constexpr std::size_t MONSTER_PATROL_COUNT = std::size(MONSTER_PATROL_PATH);
+
+    // 추격 설정.
+    static constexpr float MONSTER_DETECT_RADIUS = 8.0f;         // 이 안에 들어온 플레이어를 쫓기 시작한다.
+                                                                 // VIEW_RANGE(20)보다 작아야 플레이어가 몬스터를 먼저 보고, 다가오는 걸 눈으로 확인할 수 있다.
+    static constexpr float MONSTER_CHASE_GIVEUP_RADIUS = 12.0f;  // 타겟이 이보다 멀어지면 포기.
+                                                                 // 감지 반경보다 커야 경계에서 붙었다 떨어졌다 하지 않는다.
+    static constexpr float MONSTER_CHASE_LEASH_RADIUS = 12.0f;   // 집에서 이보다 멀어지면 추격을 접고 복귀한다(월드 끝까지 따라가지 않게).
+    static constexpr float MONSTER_CHASE_STOP_DIST = 1.0f;       // 타겟과 이 거리까지만 붙는다(몸이 겹쳐 보이지 않게).
+
+    // 배회용 난수. 게임 틱 스레드에서만 쓴다.
+    std::mt19937 wanderRng{ std::random_device{}() };
+
+    // 부하 테스트용 랜덤 스폰 범위(0이면 비활성).
+    // loginRng는 워커 스레드들이 함께 쓰므로 playersLock을 잡은 채로만 건드린다.
+    float randomSpawnExtent = 0.0f;
+    std::mt19937 loginRng{ std::random_device{}() };
+
+    // 틱 프로파일. 한 틱의 각 단계에 쓴 시간을 누적한다.
+    // 틱 스레드만 건드리므로 락이 필요 없다.
+    struct TickProfile
+    {
+        std::uint64_t samples = 0;
+        double lockWait = 0.0;      // playersLock을 잡으려고 기다린 시간
+        double integrate = 0.0;     // (1) 플레이어 위치 적분
+        double monsterAI = 0.0;     // (2) 몬스터 배회
+        double playerDiff = 0.0;    // (3) 플레이어 시야 diff
+        double monsterDiff = 0.0;   // (4) 몬스터 시야 diff
+        double send = 0.0;          // (5) 락 밖 전송
+        double total = 0.0;
+        double maxTotal = 0.0;
+    };
+
+    bool profileEnabled = false;
+    TickProfile prof;
 
     // 섹터 격자도 playersLock으로 함께 보호한다(위치/뷰리스트와 항상 같이 바뀌므로). 몬스터도 여기 들어간다.
     SectorGrid sectorGrid;
