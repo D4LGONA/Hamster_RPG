@@ -33,6 +33,7 @@ public class NetworkClient : MonoBehaviour
 
     private Protocol.PlayerStatsData myStats;
     private bool hasMyStats;
+    private int statVersion;
 
     private TcpClient client;
     private NetworkStream stream;
@@ -127,6 +128,11 @@ public class NetworkClient : MonoBehaviour
     public uint GetMyPlayerId() { return myPlayerId; }
     public bool HasMyStats() { return hasMyStats; }
     public Protocol.PlayerStatsData GetMyStats() { return myStats; }
+    public string GetPlayerName() { return playerName; }
+
+    // 스탯이 갱신될 때마다 올라간다. UI가 이 값만 보고 바뀐 때에만 다시 그리면
+    // 매 프레임 문자열을 새로 만들지 않아도 된다.
+    public int GetStatVersion() { return statVersion; }
 
     public void ConnectToServer(string inputName)
     {
@@ -237,6 +243,9 @@ public class NetworkClient : MonoBehaviour
         {
             HouseRoom.Build();
         }
+
+        // 상태창. 씬마다 새로 만든다(씬이 바뀌면 이전 것은 파괴되므로).
+        StatusPanelUI.Create();
 
         SpawnLocalPlayer();
         FlushPendingPackets();
@@ -643,6 +652,7 @@ public class NetworkClient : MonoBehaviour
 
             myStats = stats;
             hasMyStats = true;
+            statVersion++;
 
             if (leveledUp && ChatUI.Instance != null)
             {
