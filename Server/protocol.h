@@ -30,7 +30,13 @@ enum class PACKET_TYPE : std::uint16_t
     SC_DESPAWN,
 	SC_MOVEOBJECT,
     SC_CHAT,
-    SC_STAT_UPDATE
+    SC_STAT_UPDATE,
+
+    // 2026-07-17: 전투 추가. 값이 클라(Protocol.cs)와 물려 있으므로 중간에 끼워넣지 말고
+    // 반드시 맨 뒤에만 붙일 것. CS/SC가 섞이는 건 감수한다.
+    CS_ATTACK,      // 11
+    SC_DAMAGE,      // 12
+    SC_DEATH,       // 13
 };
 
 #pragma pack(push, 1)
@@ -68,6 +74,18 @@ struct CS_CHAT_PACKET
     std::uint16_t size;
     PACKET_TYPE type;
     char message[CHAT_SIZE];
+};
+
+// 공격 요청. 방향 공격이라 대상을 클라가 고르지 않는다.
+// 클라는 '어느 쪽을 휘둘렀는지'만 보내고, 그 부채꼴에 누가 걸렸는지 · 사거리 · 쿨다운 ·
+// 데미지는 전부 서버가 판정한다. dx/dy는 정규화된 방향.
+struct CS_ATTACK_PACKET
+{
+    std::uint16_t size;
+    PACKET_TYPE type;
+
+    float dx;
+    float dy;
 };
 
 // ==============================
@@ -126,6 +144,29 @@ struct SC_CHAT_PACKET
     std::uint32_t id;
     char name[NAME_SIZE];
     char message[CHAT_SIZE];
+};
+
+// 누가 누구를 때려서 얼마가 깎였는지. 맞은 쪽을 보고 있는 사람들에게 보낸다.
+// 남은 hp를 같이 실어보내서 클라가 hp를 따로 계산하지 않게 한다(서버가 유일한 정답).
+struct SC_DAMAGE_PACKET
+{
+    std::uint16_t size;
+    PACKET_TYPE type;
+
+    std::uint32_t attackerId;
+    std::uint32_t targetId;
+
+    int damage;
+    int targetHp;
+    int targetMaxHp;
+};
+
+struct SC_DEATH_PACKET
+{
+    std::uint16_t size;
+    PACKET_TYPE type;
+
+    std::uint32_t id;
 };
 
 struct SC_STAT_UPDATE_PACKET

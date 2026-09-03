@@ -150,6 +150,27 @@ public class NetworkClient : MonoBehaviour
         SendRaw(Protocol.MakeInputPacket(direction.x, direction.y));
     }
 
+    // 공격 요청. 휘두른 방향만 보낸다. 누가 맞았는지 · 데미지 · 죽음은 전부 서버가 정하고
+    // SC_DAMAGE / SC_DEATH로 돌아온다.
+    public void SendAttack(Vector2 direction)
+    {
+        if (isConnected == false || isLoggedIn == false || stream == null)
+        {
+            Debug.LogWarning("[NETWORK] SendAttack blocked.");
+            return;
+        }
+
+        if (direction.sqrMagnitude < 0.0001f)
+        {
+            return;   // 방향이 없으면 서버가 어차피 버린다
+        }
+
+        direction = direction.normalized;
+
+        Log("[NETWORK] SendAttack dx = " + direction.x + ", dy = " + direction.y);
+        SendRaw(Protocol.MakeAttackPacket(direction.x, direction.y));
+    }
+
     public void SendChat(string message)
     {
         if (isConnected == false || isLoggedIn == false || stream == null)
@@ -186,6 +207,12 @@ public class NetworkClient : MonoBehaviour
 
         localPlayerObject = Instantiate(localPlayerPrefab, new Vector3(loginPosition.x, loginPosition.y, 0.0f), Quaternion.identity);
         localPlayerObject.name = "LocalPlayer_" + myPlayerId;
+
+        // 공격 입력. 프리팹에 붙여도 되고, 안 붙어 있으면 여기서 붙인다.
+        if (localPlayerObject.GetComponent<PlayerAttackInput>() == null)
+        {
+            localPlayerObject.AddComponent<PlayerAttackInput>();
+        }
 
         // 서버 권위 이동: 내 위치는 서버가 보내주는 SC_MOVEOBJECT로 갱신된다. 초기 목표는 로그인 위치.
         localInterpolator = localPlayerObject.GetComponent<LocalPlayerInterpolator>();
@@ -325,6 +352,12 @@ public class NetworkClient : MonoBehaviour
                 break;
             case Protocol.PacketType.SC_STAT_UPDATE: 
                 HandleStatUpdate(packet); 
+                break;
+            case Protocol.PacketType.SC_DAMAGE:
+                HandleDamage(packet);
+                break;
+            case Protocol.PacketType.SC_DEATH:
+                HandleDeath(packet);
                 break;
             default:
                 mainThreadActions.Enqueue(() => Debug.LogWarning("[NETWORK] Unknown packet type: " + packetType));
@@ -481,6 +514,58 @@ public class NetworkClient : MonoBehaviour
         });
     }
 
+    // 누가 누구를 때려서 얼마가 깎였는지. 남은 hp도 같이 오므로 클라는 계산하지 않고 받아 적기만 한다.
+    private void HandleDamage(byte[] packet)
+    {
+        int offset = Protocol.HeaderSize;
+
+        uint attackerId = Protocol.ReadUInt(packet, ref offset);
+        uint targetId = Protocol.ReadUInt(packet, ref offset);
+        int damage = Protocol.ReadInt(packet, ref offset);
+        int targetHp = Protocol.ReadInt(packet, ref offset);
+        int targetMaxHp = Protocol.ReadInt(packet, ref offset);
+
+        mainThreadActions.Enqueue(() =>
+        {
+            Log("[NETWORK] Damage packet. attacker = " + attackerId + ", target = " + targetId +
+                ", damage = " + damage + ", hp = " + targetHp + "/" + targetMaxHp);
+
+            if (monsters.TryGetValue(targetId, out MonsterEntity monster))
+            {
+                monster.OnDamaged(damage, targetHp, targetMaxHp);
+                return;
+            }
+
+            // 아직 몬스터만 맞는다(서버가 플레이어를 때리지 않음). 플레이어가 대상인 패킷이
+            // 오기 시작하면 여기서 받으면 된다.
+            Log("[NETWORK] Damage target not found. id = " + targetId);
+        });
+    }
+
+    // 죽음. 서버는 SC_DESPAWN을 따로 보내지 않고 이것만 보내므로 여기서 정리까지 해야 한다.
+    // 10초 뒤 부활하면 같은 id로 SC_SPAWN이 새로 온다.
+    private void HandleDeath(byte[] packet)
+    {
+        int offset = Protocol.HeaderSize;
+        uint id = Protocol.ReadUInt(packet, ref offset);
+
+        mainThreadActions.Enqueue(() =>
+        {
+            Log("[NETWORK] Death packet. id = " + id);
+
+            RemovePendingSpawn(id);
+            if (pendingMoves.ContainsKey(id)) pendingMoves.Remove(id);
+
+            if (monsters.TryGetValue(id, out MonsterEntity monster))
+            {
+                // 사전에서 먼저 빼둔다. 죽는 연출이 끝날 때까지 오브젝트는 남아 있지만,
+                // 그 사이 같은 id로 스폰이 와도 "이미 있다"고 무시하면 안 되기 때문이다.
+                monsters.Remove(id);
+                monster.OnDeath();
+            }
+        });
+    }
+
     private void HandleStatUpdate(byte[] packet)
     {
         int offset = Protocol.HeaderSize;
@@ -488,8 +573,16 @@ public class NetworkClient : MonoBehaviour
 
         mainThreadActions.Enqueue(() =>
         {
+            // 레벨업은 스탯 갱신으로만 알 수 있다(전용 패킷이 없음). 첫 수신은 비교 대상이 없으니 뺀다.
+            bool leveledUp = hasMyStats && stats.level > myStats.level;
+
             myStats = stats;
             hasMyStats = true;
+
+            if (leveledUp && ChatUI.Instance != null)
+            {
+                ChatUI.Instance.AddSystemMessage("레벨 " + stats.level + " 달성!");
+            }
 
             Log("[NETWORK] Stat update. id = " + stats.id +
                 ", level = " + stats.level +

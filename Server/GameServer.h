@@ -40,6 +40,11 @@ private:
     void ProcessLogin(std::uint32_t playerId, const CS_LOGIN_PACKET* packet);
     void ProcessInput(std::uint32_t playerId, const CS_INPUT_PACKET* packet);
     void ProcessChat(std::uint32_t playerId, const CS_CHAT_PACKET* packet);
+    void ProcessAttack(std::uint32_t playerId, const CS_ATTACK_PACKET* packet);
+
+    // 방향 공격에 걸린 살아있는 몬스터 id들. playersLock을 잡은 상태에서만 호출한다.
+    void GatherMonstersInArc(float originX, float originY, float dirX, float dirY,
+                             std::vector<std::uint32_t>& out);
 
     // 서버 권위 이동: 고정 주기(15Hz)로 도는 게임 틱 루프.
     void GameTickThread();
@@ -72,6 +77,13 @@ private:
     bool StepChase(Monster& monster, float deltaSeconds, float& outX, float& outY);
 
     void PickWanderDirection(Monster& monster);   // 새 방향(또는 정지) + 다음 전환 시간
+
+    // 죽은 몬스터의 부활 타이머를 돌리고, 다 된 놈은 되살려 respawned에 담는다.
+    void UpdateMonsterRespawn(float deltaSeconds, std::vector<std::uint32_t>& respawned);
+
+    // 몬스터를 죽은 상태로 만든다(격자에서 빼고 보던 사람들의 viewList도 정리).
+    // 죽음 통지 대상은 deathTargets로 돌려주므로, 호출부가 락을 푼 뒤 보낸다.
+    void KillMonster(Monster& monster, std::vector<std::uint32_t>& deathTargets);
 
     void PickSpawnPosition(float& x, float& y);   // 로그인 스폰 위치. playersLock을 잡은 상태에서 호출할 것.
 
@@ -135,6 +147,20 @@ private:
                                                                  // 감지 반경보다 커야 경계에서 붙었다 떨어졌다 하지 않는다.
     static constexpr float MONSTER_CHASE_LEASH_RADIUS = 12.0f;   // 집에서 이보다 멀어지면 추격을 접고 복귀한다(월드 끝까지 따라가지 않게).
     static constexpr float MONSTER_CHASE_STOP_DIST = 1.0f;       // 타겟과 이 거리까지만 붙는다(몸이 겹쳐 보이지 않게).
+
+    // 전투 설정.
+    static constexpr float ATTACK_RANGE = 2.5f;          // 이 안에 있어야 때릴 수 있다. 몬스터가 붙는 거리(1.0)보다 넉넉하게.
+
+    // 방향 공격의 부채꼴 반각. 휘두른 방향에서 좌우로 이만큼 안에 든 몬스터가 맞는다.
+    // 50도면 전체 100도. 마우스로 대충 찍어도 맞을 만큼은 넓고, 등 뒤가 맞지는 않을 만큼은 좁다.
+    // 비교는 매번 각도를 구하지 않고 내적과 cos값으로 한다.
+    static constexpr float ATTACK_ARC_HALF_DEGREES = 50.0f;
+    static constexpr float ATTACK_ARC_COS = 0.6428f;     // cos(50도)
+
+    static constexpr float ATTACK_COOLDOWN_SEC = 0.8f;   // 공격 간격. 서버가 재서 연타를 막는다.
+    static constexpr float MONSTER_RESPAWN_SEC = 10.0f;  // 죽은 뒤 부활까지
+    static constexpr int MONSTER_EXP_REWARD = 20;        // 처치 보상(requiredExp 100 -> 5마리에 레벨업)
+    static constexpr int MONSTER_GOLD_REWARD = 10;
 
     // 배회용 난수. 게임 틱 스레드에서만 쓴다.
     std::mt19937 wanderRng{ std::random_device{}() };

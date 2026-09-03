@@ -1,4 +1,5 @@
 // 2026-06-16: 플레이어 스탯 추가
+// 2026-07-17: 경험치 획득 / 레벨업 추가.
 #pragma once
 
 struct PlayerStats
@@ -16,6 +17,35 @@ struct PlayerStats
     float moveSpeed = 5.0f;
 
     int combatPower = 0;
+
+    // 경험치를 넣고 필요하면 레벨을 올린다. 한 번에 여러 레벨이 오를 수도 있어서 while로 돈다.
+    // 레벨업했으면 true(클라에 알려줄지 판단용).
+    bool AddExp(int amount)
+    {
+        if (amount <= 0)
+        {
+            return false;
+        }
+
+        exp += amount;
+        bool leveledUp = false;
+
+        while (exp >= requiredExp)
+        {
+            exp -= requiredExp;
+            level++;
+            requiredExp = 100 + (level - 1) * 50;
+            leveledUp = true;
+        }
+
+        if (leveledUp)
+        {
+            Recalculate();   // maxHp/attack/defense 재계산
+            hp = maxHp;      // 레벨업하면 회복시켜준다
+        }
+
+        return leveledUp;
+    }
 
     void Recalculate()
     {

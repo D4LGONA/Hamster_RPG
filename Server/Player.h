@@ -39,6 +39,10 @@ public:
     float GetInputY() const { return inputY; }
     void SetInput(float newInputX, float newInputY) { inputX = newInputX; inputY = newInputY; }
 
+    // 공격 쿨다운: 마지막으로 때린 시각. 서버가 들고 있어야 클라가 연타로 속일 수 없다.
+    std::chrono::steady_clock::time_point GetLastAttackAt() const { return lastAttackAt; }
+    void SetLastAttackAt(std::chrono::steady_clock::time_point value) { lastAttackAt = value; }
+
     void SetLoggedIn(bool newLoggedIn) { loggedIn = newLoggedIn; }
     void SetPosition(float newX, float newY) { x = newX; y = newY; }
     void SetName(const std::string& newName) { name = newName; }
@@ -59,4 +63,6 @@ private:
     // 최신 입력 방향(정규화). 서버 틱이 pos += input * moveSpeed * dt 로 적분.
     float inputX = 0.0f;
     float inputY = 0.0f;
+
+    std::chrono::steady_clock::time_point lastAttackAt{};
 };

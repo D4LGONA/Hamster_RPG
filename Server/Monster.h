@@ -42,6 +42,29 @@ public:
     bool IsAlive() const { return hp > 0; }
     void TakeDamage(int damage) { hp -= damage; if (hp < 0) { hp = 0; } }
 
+    int GetAttack() const { return attack; }
+    int GetDefense() const { return defense; }
+    void SetCombatStats(int newAttack, int newDefense) { attack = newAttack; defense = newDefense; }
+
+    // 죽으면 리스폰 타이머가 돌고, 다 되면 집에서 hp를 채워 되살아난다.
+    float GetRespawnTimer() const { return respawnTimer; }
+    void SetRespawnTimer(float value) { respawnTimer = value; }
+
+    void Respawn()
+    {
+        hp = maxHp;
+        x = spawnX;
+        y = spawnY;
+        respawnTimer = 0.0f;
+
+        // 되살아날 땐 AI 상태도 처음으로. 안 그러면 죽기 직전 쫓던 타겟을 그대로 물고 시작한다.
+        dirX = 0.0f;
+        dirY = 0.0f;
+        wanderTimer = 0.0f;
+        patrolIndex = 0;
+        targetId = 0;
+    }
+
     // 나를 보고 있는 playerId 집합. 이동/피격/죽음을 이들에게만 전송한다.
     std::unordered_set<std::uint32_t>& GetWatchers() { return watchers; }
     const std::unordered_set<std::uint32_t>& GetWatchers() const { return watchers; }
@@ -74,6 +97,10 @@ private:
 
     int hp = 0;
     int maxHp = 0;
+    int attack = 5;
+    int defense = 1;
+
+    float respawnTimer = 0.0f;   // 0보다 크면 죽어서 부활을 기다리는 중
 
     std::unordered_set<std::uint32_t> watchers;
 

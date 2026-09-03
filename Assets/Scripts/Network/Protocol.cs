@@ -18,6 +18,13 @@ public static class Protocol
     public const byte EntityPlayer = 0;
     public const byte EntityMonster = 1;
 
+    // 전투 규칙. 서버 GameServer.h의 값과 같다.
+    // 판정은 전부 서버가 하고, 클라는 쿨타임 동안 패킷을 안 보내는 것과
+    // 휘두른 범위를 눈에 보이게 그리는 데에만 쓴다.
+    public const float AttackRange = 2.5f;
+    public const float AttackCooldown = 0.8f;
+    public const float AttackArcHalfDegrees = 50.0f;
+
     private static readonly Encoding PacketEncoding = new UTF8Encoding(false);
 
     public enum PacketType : ushort
@@ -34,7 +41,13 @@ public static class Protocol
         SC_DESPAWN = 7,
         SC_MOVEOBJECT = 8,
         SC_CHAT = 9,
-        SC_STAT_UPDATE
+        SC_STAT_UPDATE = 10,
+
+        // 2026-07-17: 전투. 값이 서버 protocol.h와 물려 있으므로 중간에 끼워넣지 말고
+        // 반드시 맨 뒤에만 붙일 것.
+        CS_ATTACK = 11,
+        SC_DAMAGE = 12,
+        SC_DEATH = 13
     }
     public struct PlayerStatsData
     {
@@ -96,6 +109,20 @@ public static class Protocol
 
         int offset = 0;
         WriteHeader(packet, ref offset, PacketType.CS_INPUT);
+        WriteFloat(packet, ref offset, dx);
+        WriteFloat(packet, ref offset, dy);
+
+        return packet;
+    }
+
+    // 공격 요청. 방향 공격이라 대상을 클라가 고르지 않는다.
+    // 휘두른 방향(정규화)만 보내고, 누가 맞았는지는 서버가 부채꼴로 판정한다.
+    public static byte[] MakeAttackPacket(float dx, float dy)
+    {
+        byte[] packet = new byte[HeaderSize + sizeof(float) + sizeof(float)];
+
+        int offset = 0;
+        WriteHeader(packet, ref offset, PacketType.CS_ATTACK);
         WriteFloat(packet, ref offset, dx);
         WriteFloat(packet, ref offset, dy);
 
