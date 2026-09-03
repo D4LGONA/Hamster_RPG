@@ -18,11 +18,15 @@ public class NetworkClient : MonoBehaviour
     [SerializeField] private string serverIp = Protocol.ServerIp;
     [SerializeField] private int serverPort = Protocol.Port;
     [SerializeField] private string gameSceneName = "GameScene";
+    [SerializeField] private string houseSceneName = "HouseScene";
 
     [Header("Prefab")]
     [SerializeField] private GameObject localPlayerPrefab;
     [SerializeField] private GameObject remotePlayerPrefab;
     [SerializeField] private GameObject monsterPrefab;
+    // 비워두면 코드가 임시 네모를 그린다. 프리팹을 꽂으면 그걸 쓴다.
+    // 콜라이더는 필요 없다. 충돌은 서버가 판정한다.
+    [SerializeField] private GameObject housePrefab;
 
     [Header("Debug")]
     [SerializeField] private bool enableNetworkLog = true;
@@ -53,6 +57,15 @@ public class NetworkClient : MonoBehaviour
 
     private readonly Dictionary<uint, RemotePlayer> remotePlayers = new Dictionary<uint, RemotePlayer>();
     private readonly Dictionary<uint, MonsterEntity> monsters = new Dictionary<uint, MonsterEntity>();
+    private readonly Dictionary<uint, HouseEntity> houses = new Dictionary<uint, HouseEntity>();
+
+    // 지금 있는 존. 0이면 월드, 그 외에는 그 집의 id. 서버가 SC_ZONE_CHANGE로 알려준다.
+    private uint currentZoneId;
+    private Vector2 zoneStartPosition;
+
+    // 씬을 갈아끼우는 중에는 spawn을 바로 만들지 않고 pending에 쌓아둔다.
+    // 지금 만들어봐야 씬이 로드되는 순간 다 destroy되기 때문이다.
+    private bool sceneReady;
     private readonly List<SpawnInfo> pendingSpawns = new List<SpawnInfo>();
     private readonly Dictionary<uint, Vector2> pendingMoves = new Dictionary<uint, Vector2>();
 
@@ -96,6 +109,17 @@ public class NetworkClient : MonoBehaviour
     {
         SendLogout();
         Disconnect();
+    }
+
+    // 지금 존에서 있어야 할 씬. 이 씬이 실제로 올라와 있어야 오브젝트를 만들 수 있다.
+    private string ExpectedSceneName()
+    {
+        return currentZoneId == 0 ? gameSceneName : houseSceneName;
+    }
+
+    private bool IsSceneReady()
+    {
+        return sceneReady && SceneManager.GetActiveScene().name == ExpectedSceneName();
     }
 
     public bool IsConnected() { return isConnected; }
@@ -171,6 +195,19 @@ public class NetworkClient : MonoBehaviour
         SendRaw(Protocol.MakeAttackPacket(direction.x, direction.y));
     }
 
+    // T키. 설치/입장/퇴장 중 무엇이 될지는 서버가 정한다.
+    public void SendHouseAction()
+    {
+        if (isConnected == false || isLoggedIn == false || stream == null)
+        {
+            Debug.LogWarning("[NETWORK] SendHouseAction blocked.");
+            return;
+        }
+
+        Log("[NETWORK] SendHouseAction");
+        SendRaw(Protocol.MakeHouseActionPacket());
+    }
+
     public void SendChat(string message)
     {
         if (isConnected == false || isLoggedIn == false || stream == null)
@@ -188,9 +225,19 @@ public class NetworkClient : MonoBehaviour
 
     private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
     {
-        if (scene.name != gameSceneName) return;
+        // 지금 존에 맞는 씬이 아니면 무시한다(타이틀 씬 등).
+        if (scene.name != ExpectedSceneName()) return;
 
-        Log("[NETWORK] Game scene loaded");
+        Log("[NETWORK] Scene loaded: " + scene.name + ", zone = " + currentZoneId);
+
+        sceneReady = true;
+
+        // 집 안 씬에는 카메라만 있다. 방은 서버가 허용하는 이동 범위에 맞춰 여기서 그린다.
+        if (currentZoneId != 0)
+        {
+            HouseRoom.Build();
+        }
+
         SpawnLocalPlayer();
         FlushPendingPackets();
     }
@@ -205,13 +252,19 @@ public class NetworkClient : MonoBehaviour
 
         if (localPlayerObject != null) Destroy(localPlayerObject);
 
-        localPlayerObject = Instantiate(localPlayerPrefab, new Vector3(loginPosition.x, loginPosition.y, 0.0f), Quaternion.identity);
+        localPlayerObject = Instantiate(localPlayerPrefab,
+            new Vector3(zoneStartPosition.x, zoneStartPosition.y, 0.0f), Quaternion.identity);
         localPlayerObject.name = "LocalPlayer_" + myPlayerId;
 
-        // 공격 입력. 프리팹에 붙여도 되고, 안 붙어 있으면 여기서 붙인다.
+        // 공격 / 하우징 입력. 프리팹에 붙여도 되고, 안 붙어 있으면 여기서 붙인다.
         if (localPlayerObject.GetComponent<PlayerAttackInput>() == null)
         {
             localPlayerObject.AddComponent<PlayerAttackInput>();
+        }
+
+        if (localPlayerObject.GetComponent<PlayerHouseInput>() == null)
+        {
+            localPlayerObject.AddComponent<PlayerHouseInput>();
         }
 
         // 서버 권위 이동: 내 위치는 서버가 보내주는 SC_MOVEOBJECT로 갱신된다. 초기 목표는 로그인 위치.
@@ -222,7 +275,7 @@ public class NetworkClient : MonoBehaviour
         }
         else
         {
-            localInterpolator.SetTargetPosition(loginPosition);
+            localInterpolator.SetTargetPosition(zoneStartPosition);
         }
 
         // 2026-07-14: 로컬 플레이어는 로그인 후 생성되므로, 시네머신 카메라의 Follow를 이 시점에 연결한다.
@@ -231,12 +284,15 @@ public class NetworkClient : MonoBehaviour
         {
             virtualCamera.Follow = localPlayerObject.transform;
         }
-        else
+        else if (currentZoneId == 0)
         {
+            // 집 안에서는 방 전체가 한 화면에 들어와서 따라다닐 카메라가 필요 없다.
+            // 월드에서 없는 것만 문제다.
             Debug.LogWarning("[NETWORK] CinemachineVirtualCamera not found in scene. Camera will not follow the player.");
         }
 
-        Log("[NETWORK] Spawn local player. id = " + myPlayerId + ", x = " + loginPosition.x + ", y = " + loginPosition.y);
+        Log("[NETWORK] Spawn local player. id = " + myPlayerId +
+            ", x = " + zoneStartPosition.x + ", y = " + zoneStartPosition.y);
     }
 
     private void SendLogin()
@@ -359,6 +415,12 @@ public class NetworkClient : MonoBehaviour
             case Protocol.PacketType.SC_DEATH:
                 HandleDeath(packet);
                 break;
+            case Protocol.PacketType.SC_ZONE_CHANGE:
+                HandleZoneChange(packet);
+                break;
+            case Protocol.PacketType.SC_HOUSE_RESULT:
+                HandleHouseResult(packet);
+                break;
             default:
                 mainThreadActions.Enqueue(() => Debug.LogWarning("[NETWORK] Unknown packet type: " + packetType));
                 break;
@@ -386,6 +448,10 @@ public class NetworkClient : MonoBehaviour
             isLoggedIn = true;
             loginPosition = new Vector2(x, y);
 
+            currentZoneId = 0;
+            zoneStartPosition = loginPosition;
+            sceneReady = false;
+
             Log("[NETWORK] Login success. myPlayerId = " + myPlayerId + ", x = " + x + ", y = " + y);
             SceneManager.LoadScene(gameSceneName);
         });
@@ -412,21 +478,14 @@ public class NetworkClient : MonoBehaviour
             Vector2 position = new Vector2(x, y);
             Log("[NETWORK] Spawn packet. id = " + id + ", type = " + entityType + ", x = " + x + ", y = " + y);
 
-            if (SceneManager.GetActiveScene().name != gameSceneName)
+            if (IsSceneReady() == false)
             {
                 AddPendingSpawn(id, name, position, entityType);
                 Log("[NETWORK] Add pending spawn. id = " + id);
                 return;
             }
 
-            if (entityType == Protocol.EntityMonster)
-            {
-                SpawnMonster(id, position);
-            }
-            else
-            {
-                SpawnRemotePlayer(id, name, position);
-            }
+            SpawnEntity(id, name, position, entityType);
         });
     }
 
@@ -450,6 +509,12 @@ public class NetworkClient : MonoBehaviour
             {
                 Destroy(monster.gameObject);
                 monsters.Remove(id);
+            }
+
+            if (houses.TryGetValue(id, out HouseEntity house))
+            {
+                Destroy(house.gameObject);
+                houses.Remove(id);
             }
 
             Log("[NETWORK] Despawn id = " + id);
@@ -596,6 +661,129 @@ public class NetworkClient : MonoBehaviour
         });
     }
 
+    // 존이 바뀌었다. 서버는 이 패킷을 새 존의 spawn보다 먼저 보내주므로,
+    // 여기서 씬 로드를 걸어두면 뒤따라 오는 spawn들은 pending으로 쌓였다가 씬이 뜬 뒤 처리된다.
+    private void HandleZoneChange(byte[] packet)
+    {
+        int offset = Protocol.HeaderSize;
+
+        uint zoneId = Protocol.ReadUInt(packet, ref offset);
+        float x = Protocol.ReadFloat(packet, ref offset);
+        float y = Protocol.ReadFloat(packet, ref offset);
+
+        mainThreadActions.Enqueue(() =>
+        {
+            Log("[NETWORK] Zone change. zoneId = " + zoneId + ", x = " + x + ", y = " + y);
+
+            currentZoneId = zoneId;
+            zoneStartPosition = new Vector2(x, y);
+            sceneReady = false;
+
+            ClearAllEntities();
+
+            SceneManager.LoadScene(ExpectedSceneName());
+        });
+    }
+
+    private void HandleHouseResult(byte[] packet)
+    {
+        int offset = Protocol.HeaderSize;
+
+        byte success = Protocol.ReadByte(packet, ref offset);
+        byte reason = Protocol.ReadByte(packet, ref offset);
+
+        mainThreadActions.Enqueue(() =>
+        {
+            Log("[NETWORK] House result. success = " + success + ", reason = " + reason);
+
+            if (ChatUI.Instance == null)
+            {
+                return;
+            }
+
+            if (success != 0)
+            {
+                ChatUI.Instance.AddSystemMessage("집을 지었습니다. T를 누르면 들어갑니다.");
+                return;
+            }
+
+            // 사유는 서버 protocol.h의 reason 값과 같다.
+            if (reason == 1)
+            {
+                ChatUI.Instance.AddSystemMessage("다른 집과 너무 가깝습니다. 좀 더 떨어진 곳에 지어보세요.");
+            }
+            else if (reason == 2)
+            {
+                ChatUI.Instance.AddSystemMessage("여기에는 집을 지을 수 없습니다.");
+            }
+            else if (reason == 3)
+            {
+                ChatUI.Instance.AddSystemMessage("몬스터가 사는 자리입니다. 다른 곳에 지어보세요.");
+            }
+            else
+            {
+                ChatUI.Instance.AddSystemMessage("집을 짓지 못했습니다.");
+            }
+        });
+    }
+
+    // 씬을 갈아끼우기 직전에 부른다. 씬이 바뀌면 오브젝트는 어차피 파괴되지만,
+    // 사전에 죽은 참조가 남아 있으면 다음 존에서 id가 겹칠 때 엉킨다.
+    private void ClearAllEntities()
+    {
+        foreach (KeyValuePair<uint, RemotePlayer> pair in remotePlayers)
+        {
+            if (pair.Value != null) Destroy(pair.Value.gameObject);
+        }
+
+        foreach (KeyValuePair<uint, MonsterEntity> pair in monsters)
+        {
+            if (pair.Value != null) Destroy(pair.Value.gameObject);
+        }
+
+        foreach (KeyValuePair<uint, HouseEntity> pair in houses)
+        {
+            if (pair.Value != null) Destroy(pair.Value.gameObject);
+        }
+
+        remotePlayers.Clear();
+        monsters.Clear();
+        houses.Clear();
+        pendingSpawns.Clear();
+        pendingMoves.Clear();
+    }
+
+    private void SpawnEntity(uint id, string name, Vector2 position, byte entityType)
+    {
+        if (entityType == Protocol.EntityMonster)
+        {
+            SpawnMonster(id, position);
+        }
+        else if (entityType == Protocol.EntityHouse)
+        {
+            SpawnHouse(id, name, position);
+        }
+        else
+        {
+            SpawnRemotePlayer(id, name, position);
+        }
+    }
+
+    // 집은 프리팹 없이 런타임에 만든다(지금은 네모 한 장이라 에디터에 둘 것이 없다).
+    private void SpawnHouse(uint id, string ownerName, Vector2 position)
+    {
+        if (houses.ContainsKey(id))
+        {
+            Log("[NETWORK] House already exists. id = " + id);
+            return;
+        }
+
+        houses.Add(id, HouseEntity.Create(housePrefab, id, ownerName, position));
+
+        Log("[NETWORK] Spawn house. id = " + id + ", owner = " + ownerName +
+            ", x = " + position.x + ", y = " + position.y);
+    }
+
     private void SpawnRemotePlayer(uint id, string name, Vector2 position)
     {
         if (remotePlayers.ContainsKey(id))
@@ -713,14 +901,7 @@ public class NetworkClient : MonoBehaviour
         {
             SpawnInfo spawnInfo = pendingSpawns[i];
 
-            if (spawnInfo.entityType == Protocol.EntityMonster)
-            {
-                SpawnMonster(spawnInfo.id, spawnInfo.position);
-            }
-            else
-            {
-                SpawnRemotePlayer(spawnInfo.id, spawnInfo.name, spawnInfo.position);
-            }
+            SpawnEntity(spawnInfo.id, spawnInfo.name, spawnInfo.position, spawnInfo.entityType);
         }
 
         pendingSpawns.Clear();

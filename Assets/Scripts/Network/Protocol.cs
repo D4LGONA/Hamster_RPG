@@ -17,6 +17,14 @@ public static class Protocol
     // SC_SPAWN의 엔티티 종류 (서버 protocol.h와 일치).
     public const byte EntityPlayer = 0;
     public const byte EntityMonster = 1;
+    public const byte EntityHouse = 2;
+
+    // 하우징. 서버 protocol.h의 값과 같다.
+    // 집 크기는 그리는 데에도 쓰고, 인테리어 크기는 방을 그리는 데 쓴다.
+    // 판정은 전부 서버가 하므로 여기 값은 '보이는 것과 실제가 같게' 맞추는 용도다.
+    public const float HouseSize = 3.0f;
+    public const float HouseInteriorHalfX = 4.5f;
+    public const float HouseInteriorHalfY = 4.5f;
 
     // 전투 규칙. 서버 GameServer.h의 값과 같다.
     // 판정은 전부 서버가 하고, 클라는 쿨타임 동안 패킷을 안 보내는 것과
@@ -47,7 +55,12 @@ public static class Protocol
         // 반드시 맨 뒤에만 붙일 것.
         CS_ATTACK = 11,
         SC_DAMAGE = 12,
-        SC_DEATH = 13
+        SC_DEATH = 13,
+
+        // 2026-07-18: 하우징. 마찬가지로 맨 뒤에만 붙일 것.
+        CS_HOUSE_ACTION = 14,
+        SC_ZONE_CHANGE = 15,
+        SC_HOUSE_RESULT = 16
     }
     public struct PlayerStatsData
     {
@@ -125,6 +138,17 @@ public static class Protocol
         WriteHeader(packet, ref offset, PacketType.CS_ATTACK);
         WriteFloat(packet, ref offset, dx);
         WriteFloat(packet, ref offset, dy);
+
+        return packet;
+    }
+
+    // T키. 설치할지 들어갈지 나갈지는 서버가 정하므로 보낼 내용이 없다.
+    public static byte[] MakeHouseActionPacket()
+    {
+        byte[] packet = new byte[HeaderSize];
+
+        int offset = 0;
+        WriteHeader(packet, ref offset, PacketType.CS_HOUSE_ACTION);
 
         return packet;
     }

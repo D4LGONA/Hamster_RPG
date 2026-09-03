@@ -9,6 +9,7 @@
 #include "Session.h"
 #include "Player.h"
 #include "Monster.h"
+#include "House.h"
 #include "SectorGrid.h"
 
 class GameServer
@@ -41,6 +42,7 @@ private:
     void ProcessInput(std::uint32_t playerId, const CS_INPUT_PACKET* packet);
     void ProcessChat(std::uint32_t playerId, const CS_CHAT_PACKET* packet);
     void ProcessAttack(std::uint32_t playerId, const CS_ATTACK_PACKET* packet);
+    void ProcessHouseAction(std::uint32_t playerId);
 
     // 방향 공격에 걸린 살아있는 몬스터 id들. playersLock을 잡은 상태에서만 호출한다.
     void GatherMonstersInArc(float originX, float originY, float dirX, float dirY,
@@ -85,6 +87,39 @@ private:
     // 죽음 통지 대상은 deathTargets로 돌려주므로, 호출부가 락을 푼 뒤 보낸다.
     void KillMonster(Monster& monster, std::vector<std::uint32_t>& deathTargets);
 
+    // ---- 하우징. 아래 전부 playersLock을 잡은 상태에서만 호출한다. ----
+
+    static bool IsHouseId(std::uint32_t id) { return id >= HOUSE_ID_BASE && id < MONSTER_ID_BASE; }
+
+    House* FindHouseByOwner(const std::string& ownerName);
+
+    // 집을 짓는다. 실패하면 reason에 사유를 담아 false.
+    bool PlaceHouse(Player& owner, std::uint8_t& reason,
+                    std::vector<std::pair<std::uint32_t, SC_SPAWN_PACKET>>& spawnSends);
+
+    void EnterHouse(Player& player, House& house,
+                    std::vector<std::pair<std::uint32_t, SC_SPAWN_PACKET>>& spawnSends,
+                    std::vector<std::pair<std::uint32_t, SC_DESPAWN_PACKET>>& despawnSends);
+
+    void ExitHouse(Player& player,
+                   std::vector<std::pair<std::uint32_t, SC_SPAWN_PACKET>>& spawnSends,
+                   std::vector<std::pair<std::uint32_t, SC_DESPAWN_PACKET>>& despawnSends);
+
+    // 지금 보고 있는 것들과의 관계를 전부 끊는다(존을 옮기기 직전에 부른다).
+    // 섹터 격자에서 빼는 것은 호출부가 상황에 맞게 한다.
+    void ClearView(Player& player, std::vector<std::pair<std::uint32_t, SC_DESPAWN_PACKET>>& despawnSends);
+
+    // 그 자리에 있는 주변 것들을 서로 보이게 만든다(존에 막 들어왔을 때).
+    void PopulateWorldView(Player& player, std::vector<std::pair<std::uint32_t, SC_SPAWN_PACKET>>& spawnSends);
+
+    // (x, y)에 플레이어가 서 있을 때 집에 파묻히는가. 이동을 막는 데 쓴다.
+    bool IsBlockedByHouse(float x, float y);
+
+    // (x, y)가 어느 집 문에 닿아 있는가. 닿아 있으면 그 집 id를 outHouseId에 넣고 true.
+    bool IsAtHouseDoor(float x, float y, std::uint32_t& outHouseId);
+
+    SC_SPAWN_PACKET MakeSpawnPacket(const House& house);
+
     void PickSpawnPosition(float& x, float& y);   // 로그인 스폰 위치. playersLock을 잡은 상태에서 호출할 것.
 
     void ReportTickProfile();   // 누적된 틱 프로파일을 찍고 리셋. 틱 스레드에서만 호출.
@@ -113,10 +148,40 @@ private:
     std::unordered_map<std::uint32_t, Player> players;
 
     // 몬스터. playersLock으로 players/sectorGrid와 함께 보호한다.
-    // id가 MONSTER_ID_BASE 이상이면 몬스터(플레이어 id와 겹치지 않게 분리).
-    static constexpr std::uint32_t MONSTER_ID_BASE = 1000000;
+    // id 대역으로 종류를 구분한다(HOUSE_ID_BASE 주석의 표 참고).
+    // 집이 1,000,000대를 쓰므로 몬스터는 2,000,000부터.
+    static constexpr std::uint32_t MONSTER_ID_BASE = 2000000;
     std::uint32_t nextMonsterId = MONSTER_ID_BASE;
     std::unordered_map<std::uint32_t, Monster> monsters;
+
+    // 집. 몬스터와 마찬가지로 playersLock으로 players/sectorGrid와 함께 보호한다.
+    // id 대역을 나눠 놓아서 id만 보고 무엇인지 구분한다.
+    //   1 ~ 999,999          플레이어
+    //   1,000,000 ~ 1,999,999 집
+    //   2,000,000 이상        몬스터
+    static constexpr std::uint32_t HOUSE_ID_BASE = 1000000;
+    std::uint32_t nextHouseId = HOUSE_ID_BASE;
+    std::unordered_map<std::uint32_t, House> houses;
+
+    static constexpr float HOUSE_HALF = HOUSE_SIZE * 0.5f;
+
+    // 집 중심끼리 이만큼은 떨어져야 지을 수 있다. 집 크기(3) + 통로(2).
+    // 단순히 '안 겹치게'만 하면 집을 딱 붙여 지어서 지나갈 틈이 없는 벽이 생긴다.
+    static constexpr float HOUSE_MIN_CENTER_DISTANCE = 5.0f;
+
+    // 충돌 판정에서 플레이어/몬스터를 점이 아니라 이만큼의 반지름으로 본다.
+    static constexpr float PLAYER_RADIUS = 0.4f;
+
+    // 문 판정 깊이.
+    // 이동은 틱 단위(15Hz)라 한 번에 moveSpeed/15 = 0.33씩 건너뛴다. 그래서 벽에 막혀 멈추는
+    // 지점이 딱 벽면(1.9)이 아니라 1.9 ~ 2.23 사이 아무 데나 된다. 여유를 그보다 크게 잡아야
+    // "분명히 문에 붙었는데 안 들어가지는" 일이 안 생긴다.
+    static constexpr float HOUSE_DOOR_REACH = HOUSE_HALF + PLAYER_RADIUS + 0.5f;   // 2.4
+
+    // 몬스터 자리에는 집을 못 짓는다.
+    // 몬스터는 죽어도 스폰 지점에서 되살아나고 멀어지면 거기로 돌아오므로,
+    // 스폰 지점을 덮어버리면 그 몬스터는 영영 집 안에 갇혀 산다(플레이어는 못 들어가니 잡지도 못한다).
+    static constexpr float HOUSE_MONSTER_CLEARANCE = 3.0f;
 
     // 몬스터 AI 설정.
     static constexpr float MONSTER_MOVE_SPEED = 2.0f;      // 플레이어(5.0)보다 느리게

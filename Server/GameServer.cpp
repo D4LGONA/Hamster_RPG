@@ -307,6 +307,13 @@ void GameServer::ProcessPacket(std::uint32_t playerId, const char* data, int byt
             }
             break;
 
+        case PACKET_TYPE::CS_HOUSE_ACTION:
+            if (packetSize == sizeof(CS_HOUSE_ACTION_PACKET))
+            {
+                ProcessHouseAction(playerId);
+            }
+            break;
+
         case PACKET_TYPE::CS_LOGOUT:
             if (packetSize == sizeof(CS_LOGOUT_PACKET))
             {
@@ -369,12 +376,35 @@ bool GameServer::InViewRange(const Player& a, const Player& b)
 }
 
 // player/monster 공통 위치 조회. id로 종류를 구분한다.
+SC_SPAWN_PACKET GameServer::MakeSpawnPacket(const House& house)
+{
+    SC_SPAWN_PACKET spawn{};
+    spawn.size = sizeof(SC_SPAWN_PACKET);
+    spawn.type = PACKET_TYPE::SC_SPAWN;
+    spawn.id = house.GetId();
+    // 이름 칸에 주인 이름을 실어 보낸다. 클라가 "OO의 집"으로 띄운다.
+    strncpy_s(spawn.name, sizeof(spawn.name), house.GetOwnerName().c_str(), _TRUNCATE);
+    spawn.x = house.GetX();
+    spawn.y = house.GetY();
+    spawn.entityType = ENTITY_HOUSE;
+    return spawn;
+}
+
 bool GameServer::GetEntityPosition(std::uint32_t id, float& x, float& y)
 {
     if (IsMonsterId(id))
     {
         auto iter = monsters.find(id);
         if (iter == monsters.end()) { return false; }
+        x = iter->second.GetX();
+        y = iter->second.GetY();
+        return true;
+    }
+
+    if (IsHouseId(id))
+    {
+        auto iter = houses.find(id);
+        if (iter == houses.end()) { return false; }
         x = iter->second.GetX();
         y = iter->second.GetY();
         return true;
@@ -708,18 +738,37 @@ void GameServer::UpdateMonsters(float deltaSeconds, std::vector<std::uint32_t>& 
             continue;
         }
 
+        float oldX = monster.GetX();
+        float oldY = monster.GetY();
+
+        // 집을 통과하지 못하게 한다. 플레이어는 집에 못 들어가는데 몬스터만 들어갈 수 있으면
+        // 집 안에 들어앉은 몬스터를 아무도 잡을 수 없게 된다.
+        // 이미 안에 있다면(집이 나중에 지어진 경우) 충돌을 꺼서 걸어 나올 수 있게 둔다.
+        const bool monsterStuckInside = IsBlockedByHouse(oldX, oldY);
+
+        if (monsterStuckInside == false)
+        {
+            // 플레이어와 같은 방식으로 축을 따로 판정해 벽을 따라 미끄러지게 한다.
+            if (IsBlockedByHouse(newX, oldY))
+            {
+                newX = oldX;
+            }
+
+            if (IsBlockedByHouse(newX, newY))
+            {
+                newY = oldY;
+            }
+        }
+
         // 월드 경계 clamp
         if (newX < WORLD_MIN) { newX = WORLD_MIN; }
         if (newX > WORLD_MAX) { newX = WORLD_MAX; }
         if (newY < WORLD_MIN) { newY = WORLD_MIN; }
         if (newY > WORLD_MAX) { newY = WORLD_MAX; }
 
-        float oldX = monster.GetX();
-        float oldY = monster.GetY();
-
         if (newX == oldX && newY == oldY)
         {
-            continue;   // 경계에 눌려 실제 이동 없음
+            continue;   // 경계나 집에 막혀 실제 이동 없음
         }
 
         monster.SetPosition(newX, newY);
@@ -759,10 +808,10 @@ void GameServer::ProcessLogin(std::uint32_t playerId, const CS_LOGIN_PACKET* pac
 
     PlayerStats selfStats;
     SC_LOGIN_RESULT_PACKET loginResult{};
-    SC_SPAWN_PACKET selfSpawn{};
 
-    std::vector<SC_SPAWN_PACKET> spawnToMe;      // 내 화면에 띄울 주변 기존 플레이어들
-    std::vector<std::uint32_t> spawnMeTargets;   // 나를 spawn해줄 주변 상대들
+    // (받을 사람, 보낼 spawn). 주변을 서로 보이게 만드는 일은 PopulateWorldView가 한다.
+    std::vector<std::pair<std::uint32_t, SC_SPAWN_PACKET>> spawnSends;
+    std::size_t viewCount = 0;
 
     {
         std::lock_guard<std::mutex> lock(playersLock);
@@ -792,63 +841,11 @@ void GameServer::ProcessLogin(std::uint32_t playerId, const CS_LOGIN_PACKET* pac
         // 섹터 격자에 등록
         sectorGrid.Add(playerId, self.GetX(), self.GetY());
 
-        // 전체 순회 대신 주변 3x3 섹터 후보만 모아 시야 판정
-        std::vector<std::uint32_t> nearby;
-        sectorGrid.GatherNearby(self.GetX(), self.GetY(), nearby);
+        // 주변 3x3 섹터만 보고 서로 보이게 만든다(플레이어 / 몬스터 / 집).
+        // 집에서 나올 때(ExitHouse)도 똑같은 일을 하므로 함수로 묶어 두었다.
+        PopulateWorldView(self, spawnSends);
 
-        for (std::uint32_t otherId : nearby)
-        {
-            if (otherId == playerId)
-            {
-                continue;
-            }
-
-            // 몬스터: 내 화면에만 spawn (몬스터는 클라가 없어 reciprocal 없음)
-            if (IsMonsterId(otherId))
-            {
-                auto monsterIter = monsters.find(otherId);
-
-                if (monsterIter == monsters.end())
-                {
-                    continue;
-                }
-
-                Monster& monster = monsterIter->second;
-
-                if (InRange(self.GetX(), self.GetY(), monster.GetX(), monster.GetY()) == false)
-                {
-                    continue;
-                }
-
-                self.GetViewList().insert(otherId);
-                monster.GetWatchers().insert(playerId);
-                spawnToMe.push_back(MakeSpawnPacket(monster));   // 몬스터 -> 나
-                continue;
-            }
-
-            auto otherIter = players.find(otherId);
-
-            if (otherIter == players.end())
-            {
-                continue;
-            }
-
-            Player& other = otherIter->second;
-
-            if (InViewRange(self, other) == false)
-            {
-                continue;
-            }
-
-            // 서로 뷰리스트에 추가
-            self.GetViewList().insert(otherId);
-            other.GetViewList().insert(playerId);
-
-            spawnToMe.push_back(MakeSpawnPacket(other));   // 기존 플레이어 -> 나
-            spawnMeTargets.push_back(otherId);             // 나 -> 그 상대
-        }
-
-        selfSpawn = MakeSpawnPacket(self);
+        viewCount = self.GetViewList().size();
 
         loginResult.size = sizeof(SC_LOGIN_RESULT_PACKET);
         loginResult.type = PACKET_TYPE::SC_LOGIN_RESULT;
@@ -862,19 +859,14 @@ void GameServer::ProcessLogin(std::uint32_t playerId, const CS_LOGIN_PACKET* pac
     SendPacket(playerId, &loginResult, loginResult.size);
     SendStatUpdate(playerId, selfStats);
 
-    for (const SC_SPAWN_PACKET& spawn : spawnToMe)
+    for (auto& [targetId, spawn] : spawnSends)
     {
-        SendPacket(playerId, &spawn, spawn.size);
-    }
-
-    for (std::uint32_t targetId : spawnMeTargets)
-    {
-        SendPacket(targetId, &selfSpawn, selfSpawn.size);
+        SendPacket(targetId, &spawn, spawn.size);
     }
 
     std::cout << "[LOGIN] id = " << loginResult.id
         << ", name = " << playerName
-        << ", view = " << spawnMeTargets.size() << std::endl;
+        << ", view = " << viewCount << std::endl;
 }
 
 // 서버 권위 이동: 클라의 입력 방향만 저장한다. 실제 위치 계산은 게임 틱(UpdateWorld)에서.
@@ -933,6 +925,7 @@ void GameServer::UpdateWorld(float deltaSeconds)
     std::vector<std::pair<std::uint32_t, SC_MOVE_PACKET>> moveSends;
     std::vector<std::pair<std::uint32_t, SC_SPAWN_PACKET>> spawnSends;
     std::vector<std::pair<std::uint32_t, SC_DESPAWN_PACKET>> despawnSends;
+    std::vector<std::pair<std::uint32_t, SC_ZONE_CHANGE_PACKET>> zoneChangeSends;
 
     {
         std::lock_guard<std::mutex> lock(playersLock);
@@ -940,6 +933,11 @@ void GameServer::UpdateWorld(float deltaSeconds)
 
         // 1) 입력이 있는 플레이어의 위치를 적분한다.
         std::vector<std::uint32_t> playerMovers;
+        std::vector<std::uint32_t> houseZoneMovers;   // 집 안에서 움직인 사람
+
+        // 문 판정 대상. 움직였는지가 아니라 '움직이려 했는지'로 모은다.
+        // 문 앞에서는 벽에 막혀 위치가 안 바뀌는데, movers로 모으면 바로 그 순간이 빠진다.
+        std::vector<std::uint32_t> doorCandidates;
 
         for (auto& [id, player] : players)
         {
@@ -956,8 +954,45 @@ void GameServer::UpdateWorld(float deltaSeconds)
             float oldX = player.GetX();
             float oldY = player.GetY();
 
+            // 집 안은 좌표계가 따로다. 섹터 격자에 들어있지 않고 집과 부딪히지도 않는다.
+            if (player.GetZoneId() != 0)
+            {
+                float insideX = std::clamp(oldX + ix * speed * deltaSeconds,
+                                           -HOUSE_INTERIOR_HALF_X, HOUSE_INTERIOR_HALF_X);
+                float insideY = std::clamp(oldY + iy * speed * deltaSeconds,
+                                           -HOUSE_INTERIOR_HALF_Y, HOUSE_INTERIOR_HALF_Y);
+
+                if (insideX == oldX && insideY == oldY)
+                {
+                    continue;
+                }
+
+                player.SetPosition(insideX, insideY);
+                houseZoneMovers.push_back(id);
+                continue;
+            }
+
+            doorCandidates.push_back(id);
+
+            // 이미 집 안에 파묻힌 상태라면 충돌을 끈다. 안 그러면 양쪽 축이 다 막혀
+            // 영영 못 빠져나온다(집이 생기는 순간 겹쳤다면 그럴 수 있다).
+            const bool stuckInside = IsBlockedByHouse(oldX, oldY);
+
+            // 축을 따로 판정한다. 한 축이 막혀도 다른 축으로는 미끄러지게 하려는 것이다.
+            // 한 번에 판정해 막아버리면 벽에 비스듬히 붙었을 때 아예 못 움직인다.
             float newX = oldX + ix * speed * deltaSeconds;
+
+            if (stuckInside == false && IsBlockedByHouse(newX, oldY))
+            {
+                newX = oldX;
+            }
+
             float newY = oldY + iy * speed * deltaSeconds;
+
+            if (stuckInside == false && IsBlockedByHouse(newX, newY))
+            {
+                newY = oldY;
+            }
 
             // 월드 경계 clamp
             if (newX < WORLD_MIN) { newX = WORLD_MIN; }
@@ -967,12 +1002,69 @@ void GameServer::UpdateWorld(float deltaSeconds)
 
             if (newX == oldX && newY == oldY)
             {
-                continue;   // 경계에 눌려 실제 이동 없음
+                continue;   // 경계나 집에 막혀 실제 이동 없음
             }
 
             player.SetPosition(newX, newY);
             sectorGrid.Move(id, oldX, oldY, newX, newY);
             playerMovers.push_back(id);
+        }
+
+        // 1-b) 문에 닿았으면 그 집으로 들어간다.
+        // 닿아 있는 '순간'에만 발동시킨다(inDoorZone). 안 그러면 문 앞에 서 있는 동안
+        // 매 틱 입장 처리가 돌아 존을 계속 갈아끼운다.
+        for (std::uint32_t moverId : doorCandidates)
+        {
+            auto meIter = players.find(moverId);
+
+            if (meIter == players.end())
+            {
+                continue;
+            }
+
+            Player& me = meIter->second;
+
+            if (me.GetZoneId() != 0)
+            {
+                continue;
+            }
+
+            std::uint32_t doorHouseId = 0;
+
+            if (IsAtHouseDoor(me.GetX(), me.GetY(), doorHouseId) == false)
+            {
+                me.SetInDoorZone(false);   // 문에서 떨어졌다. 다음에 닿으면 다시 발동
+                continue;
+            }
+
+            if (me.IsInDoorZone())
+            {
+                continue;   // 이미 닿아 있던 상태
+            }
+
+            me.SetInDoorZone(true);
+
+            auto doorHouseIter = houses.find(doorHouseId);
+
+            if (doorHouseIter == houses.end())
+            {
+                continue;
+            }
+
+            // 남의 집 문이어도 들어간다. 같은 집에 있는 사람끼리는 서로 보이므로 방문이 된다.
+            EnterHouse(me, doorHouseIter->second, spawnSends, despawnSends);
+
+            SC_ZONE_CHANGE_PACKET zoneChange{};
+            zoneChange.size = sizeof(SC_ZONE_CHANGE_PACKET);
+            zoneChange.type = PACKET_TYPE::SC_ZONE_CHANGE;
+            zoneChange.zoneId = doorHouseId;
+            zoneChange.x = me.GetX();
+            zoneChange.y = me.GetY();
+
+            zoneChangeSends.emplace_back(moverId, zoneChange);
+
+            std::cout << "[ZONE] id = " << moverId << " -> house " << doorHouseId
+                      << " (door)" << std::endl;
         }
 
         t1 = profClock::now();
@@ -996,6 +1088,11 @@ void GameServer::UpdateWorld(float deltaSeconds)
             }
 
             Player& me = meIter->second;
+
+            if (me.GetZoneId() != 0)
+            {
+                continue;   // 이번 틱에 문으로 들어간 사람. 월드 시야 처리 대상이 아니다
+            }
 
             SC_MOVE_PACKET movePacket{};
             movePacket.size = sizeof(SC_MOVE_PACKET);
@@ -1044,7 +1141,7 @@ void GameServer::UpdateWorld(float deltaSeconds)
                 if (IsMonsterId(otherId))
                 {
                     // 상대가 몬스터: 내 화면에만 spawn(reciprocal 없음).
-                    // 계속 보이는 몬스터의 이동은 아래 (4) 몬스터 diff가 보내므로 여기선 안 보낸다.
+                    // 계속 보이는 몬스터의 이동은 아래 (4) 몬스터 diff가 보내므로 여긴 안 보낸다.
                     if (isNew)
                     {
                         auto monsterIter = monsters.find(otherId);
@@ -1053,6 +1150,22 @@ void GameServer::UpdateWorld(float deltaSeconds)
                         {
                             monsterIter->second.GetWatchers().insert(moverId);
                             spawnSends.emplace_back(moverId, MakeSpawnPacket(monsterIter->second)); // 몬스터 -> 나
+                        }
+                    }
+                    continue;
+                }
+
+                if (IsHouseId(otherId))
+                {
+                    // 집도 몬스터와 같다. 다만 움직이지 않으니 이동 전송이 영영 없다.
+                    if (isNew)
+                    {
+                        auto houseIter = houses.find(otherId);
+
+                        if (houseIter != houses.end())
+                        {
+                            houseIter->second.GetWatchers().insert(moverId);
+                            spawnSends.emplace_back(moverId, MakeSpawnPacket(houseIter->second));   // 집 -> 나
                         }
                     }
                     continue;
@@ -1102,6 +1215,19 @@ void GameServer::UpdateWorld(float deltaSeconds)
                     continue;
                 }
 
+                if (IsHouseId(otherId))
+                {
+                    auto houseIter = houses.find(otherId);
+
+                    if (houseIter != houses.end())
+                    {
+                        houseIter->second.GetWatchers().erase(moverId);
+                    }
+
+                    despawnSends.emplace_back(moverId, despawnOther);  // 나에게 집 despawn
+                    continue;
+                }
+
                 auto otherIter = players.find(otherId);
 
                 if (otherIter != players.end())
@@ -1118,6 +1244,34 @@ void GameServer::UpdateWorld(float deltaSeconds)
             }
 
             oldView = std::move(newView);   // 내 뷰리스트 갱신
+        }
+
+        // 3-b) 집 안에서 움직인 사람. 같은 집에 있는 사람끼리는 입장/퇴장 때 이미 서로
+        // 보게 만들어 두었으므로, 여기서는 시야 diff 없이 이동만 뿌리면 된다.
+        for (std::uint32_t moverId : houseZoneMovers)
+        {
+            auto meIter = players.find(moverId);
+
+            if (meIter == players.end())
+            {
+                continue;
+            }
+
+            Player& me = meIter->second;
+
+            SC_MOVE_PACKET movePacket{};
+            movePacket.size = sizeof(SC_MOVE_PACKET);
+            movePacket.type = PACKET_TYPE::SC_MOVEOBJECT;
+            movePacket.id = moverId;
+            movePacket.x = me.GetX();
+            movePacket.y = me.GetY();
+
+            moveSends.emplace_back(moverId, movePacket);   // 내 위치도 서버가 소유한다
+
+            for (std::uint32_t otherId : me.GetViewList())
+            {
+                moveSends.emplace_back(otherId, movePacket);
+            }
         }
 
         t3 = profClock::now();
@@ -1219,7 +1373,15 @@ void GameServer::UpdateWorld(float deltaSeconds)
         t4 = profClock::now();
     }
 
-    // ---- playersLock 해제 후 전송 (spawn -> move -> despawn 순서로 클라 처리 안전하게) ----
+    // ---- playersLock 해제 후 전송 ----
+    // 존 변경이 제일 먼저다. 클라가 이걸 받고 씬을 갈아끼우므로, 새 존의 spawn이 먼저 도착하면
+    // 아직 옛 씬에 오브젝트를 만들었다가 씬 로드와 함께 날려버린다.
+    for (auto& [targetId, packet] : zoneChangeSends)
+    {
+        SendPacket(targetId, &packet, packet.size);
+    }
+
+    // 그다음 spawn -> move -> despawn 순서로 클라 처리 안전하게.
     for (auto& [targetId, packet] : spawnSends)
     {
         SendPacket(targetId, &packet, packet.size);
@@ -1438,6 +1600,546 @@ void GameServer::ProcessAttack(std::uint32_t playerId, const CS_ATTACK_PACKET* p
     }
 }
 
+// ============================================================
+//  하우징
+// ============================================================
+
+// T키 한 번. 지금 상황을 보고 설치 / 입장 / 퇴장 중 하나를 고른다.
+// 무엇을 할지 클라가 정하지 않는 이유는, 집을 가졌는지 아는 쪽이 서버이기 때문이다.
+void GameServer::ProcessHouseAction(std::uint32_t playerId)
+{
+    std::vector<std::pair<std::uint32_t, SC_SPAWN_PACKET>> spawnSends;
+    std::vector<std::pair<std::uint32_t, SC_DESPAWN_PACKET>> despawnSends;
+    std::vector<std::pair<std::uint32_t, SC_MOVE_PACKET>> moveSends;
+
+    bool sendZone = false;
+    SC_ZONE_CHANGE_PACKET zoneChange{};
+
+    bool sendResult = false;
+    SC_HOUSE_RESULT_PACKET houseResult{};
+
+    {
+        std::lock_guard<std::mutex> lock(playersLock);
+
+        auto iter = players.find(playerId);
+
+        if (iter == players.end())
+        {
+            return;
+        }
+
+        Player& player = iter->second;
+
+        if (player.GetZoneId() != 0)
+        {
+            // 집 안 -> 밖
+            ExitHouse(player, spawnSends, despawnSends);
+
+            sendZone = true;
+            zoneChange.zoneId = 0;
+            zoneChange.x = player.GetX();
+            zoneChange.y = player.GetY();
+        }
+        else
+        {
+            House* house = FindHouseByOwner(player.GetName());
+
+            if (house != nullptr)
+            {
+                // 밖 + 집 있음 -> 집으로 귀환
+                std::uint32_t houseId = house->GetId();
+
+                EnterHouse(player, *house, spawnSends, despawnSends);
+
+                sendZone = true;
+                zoneChange.zoneId = houseId;
+                zoneChange.x = player.GetX();
+                zoneChange.y = player.GetY();
+            }
+            else
+            {
+                // 밖 + 집 없음 -> 그 자리에 짓는다
+                std::uint8_t reason = 0;
+                bool placed = PlaceHouse(player, reason, spawnSends);
+
+                sendResult = true;
+                houseResult.success = placed ? 1 : 0;
+                houseResult.reason = reason;
+
+                if (placed)
+                {
+                    // 집에 파묻히지 않게 밖으로 밀어냈으므로 새 위치를 알려준다.
+                    SC_MOVE_PACKET movePacket{};
+                    movePacket.size = sizeof(SC_MOVE_PACKET);
+                    movePacket.type = PACKET_TYPE::SC_MOVEOBJECT;
+                    movePacket.id = playerId;
+                    movePacket.x = player.GetX();
+                    movePacket.y = player.GetY();
+
+                    moveSends.emplace_back(playerId, movePacket);
+
+                    for (std::uint32_t viewerId : player.GetViewList())
+                    {
+                        if (IsMonsterId(viewerId) || IsHouseId(viewerId))
+                        {
+                            continue;
+                        }
+
+                        moveSends.emplace_back(viewerId, movePacket);
+                    }
+                }
+            }
+        }
+    }
+
+    // ---- 락 해제 후 전송 ----
+
+    // 존 변경을 제일 먼저 보낸다. 클라는 이걸 받고 씬을 갈아끼우는데, 새 존의 spawn이
+    // 먼저 도착해 버리면 아직 옛 씬에 오브젝트를 만들었다가 씬 로드와 함께 다 날려버린다.
+    // 순서를 지켜야 클라가 "지금부터 오는 것은 새 존 것"으로 받아둘 수 있다.
+    if (sendZone)
+    {
+        zoneChange.size = sizeof(SC_ZONE_CHANGE_PACKET);
+        zoneChange.type = PACKET_TYPE::SC_ZONE_CHANGE;
+        SendPacket(playerId, &zoneChange, zoneChange.size);
+
+        std::cout << "[ZONE] id = " << playerId << " -> zone " << zoneChange.zoneId << std::endl;
+    }
+
+    for (auto& [targetId, despawn] : despawnSends)
+    {
+        SendPacket(targetId, &despawn, despawn.size);
+    }
+
+    for (auto& [targetId, spawn] : spawnSends)
+    {
+        SendPacket(targetId, &spawn, spawn.size);
+    }
+
+    for (auto& [targetId, move] : moveSends)
+    {
+        SendPacket(targetId, &move, move.size);
+    }
+
+    if (sendResult)
+    {
+        houseResult.size = sizeof(SC_HOUSE_RESULT_PACKET);
+        houseResult.type = PACKET_TYPE::SC_HOUSE_RESULT;
+        SendPacket(playerId, &houseResult, houseResult.size);
+
+        std::cout << "[HOUSE] id = " << playerId << ", success = " << static_cast<int>(houseResult.success)
+                  << ", reason = " << static_cast<int>(houseResult.reason) << std::endl;
+    }
+}
+
+// 이름으로 집을 찾는다. 집이 몇 채 안 되는 동안은 선형 탐색으로 충분하다.
+// 많아지면 이름 -> houseId 맵을 따로 두면 된다.
+House* GameServer::FindHouseByOwner(const std::string& ownerName)
+{
+    for (auto& [id, house] : houses)
+    {
+        if (house.GetOwnerName() == ownerName)
+        {
+            return &house;
+        }
+    }
+
+    return nullptr;
+}
+
+// 서 있는 자리에 집을 짓는다.
+bool GameServer::PlaceHouse(Player& owner, std::uint8_t& reason,
+                            std::vector<std::pair<std::uint32_t, SC_SPAWN_PACKET>>& spawnSends)
+{
+    const float x = owner.GetX();
+    const float y = owner.GetY();
+
+    // 집이 월드 밖으로 삐져나오면 안 된다.
+    if (x - HOUSE_HALF < WORLD_MIN || x + HOUSE_HALF > WORLD_MAX ||
+        y - HOUSE_HALF < WORLD_MIN || y + HOUSE_HALF > WORLD_MAX)
+    {
+        reason = 2;
+        return false;
+    }
+
+    // 집을 추가하기 전에 주변을 훑는다. 거리 검사와 spawn 대상 찾기에 같이 쓴다.
+    std::vector<std::uint32_t> nearby;
+    sectorGrid.GatherNearby(x, y, nearby);
+
+    for (std::uint32_t id : nearby)
+    {
+        if (IsHouseId(id) == false)
+        {
+            continue;
+        }
+
+        auto houseIter = houses.find(id);
+
+        if (houseIter == houses.end())
+        {
+            continue;
+        }
+
+        // 겹치지만 않으면 되는 게 아니라, 통로가 남을 만큼 떨어져야 한다.
+        // 딱 붙여 지으면 사람이 지나갈 틈이 없는 벽이 생긴다.
+        if (WithinRadius(x, y, houseIter->second.GetX(), houseIter->second.GetY(),
+                         HOUSE_MIN_CENTER_DISTANCE))
+        {
+            reason = 1;
+            return false;
+        }
+    }
+
+    // 몬스터 자리인지 확인. 지금 서 있는 위치와 스폰 지점을 둘 다 본다.
+    // 스폰 지점이 더 중요하다. 몬스터는 죽으면 거기서 되살아나고 멀어지면 거기로 돌아오므로,
+    // 스폰 지점을 집으로 덮으면 그 몬스터는 영영 안에 갇힌다.
+    for (std::uint32_t id : nearby)
+    {
+        if (IsMonsterId(id) == false)
+        {
+            continue;
+        }
+
+        auto monsterIter = monsters.find(id);
+
+        if (monsterIter == monsters.end())
+        {
+            continue;
+        }
+
+        const Monster& monster = monsterIter->second;
+
+        if (WithinRadius(x, y, monster.GetSpawnX(), monster.GetSpawnY(), HOUSE_MONSTER_CLEARANCE) ||
+            (monster.IsAlive() &&
+             WithinRadius(x, y, monster.GetX(), monster.GetY(), HOUSE_MONSTER_CLEARANCE)))
+        {
+            reason = 3;
+            return false;
+        }
+    }
+
+    std::uint32_t houseId = nextHouseId++;
+
+    houses.emplace(houseId, House{ houseId, owner.GetName(), x, y });
+    sectorGrid.Add(houseId, x, y);
+
+    // 지은 사람이 자기 집에 파묻혀 못 움직이게 되지 않도록 남쪽으로 밀어낸다.
+    // 문 기둥은 피해서 옆에 세운다. 문 앞에 세우면 걷기 시작하자마자 자기 집에 빨려 들어간다.
+    float ownerX = x + HOUSE_EXIT_SIDE_OFFSET;
+    float ownerY = y - HOUSE_EXIT_OFFSET;
+
+    if (ownerX > WORLD_MAX) { ownerX = WORLD_MAX; }
+    if (ownerY < WORLD_MIN) { ownerY = WORLD_MIN; }
+
+    sectorGrid.Move(owner.GetId(), owner.GetX(), owner.GetY(), ownerX, ownerY);
+    owner.SetPosition(ownerX, ownerY);
+    owner.SetInput(0.0f, 0.0f);
+
+    House& house = houses.find(houseId)->second;
+    SC_SPAWN_PACKET houseSpawn = MakeSpawnPacket(house);
+
+    // 주변 사람들 화면에 집을 즉시 띄운다.
+    // 시야 diff는 '움직인 사람'에 대해서만 도는데, 가만히 서 있는 사람 눈앞에 집이 생기는
+    // 경우는 그 diff가 돌지 않으므로 여기서 직접 보내야 한다.
+    for (std::uint32_t id : nearby)
+    {
+        if (IsMonsterId(id) || IsHouseId(id))
+        {
+            continue;
+        }
+
+        auto playerIter = players.find(id);
+
+        if (playerIter == players.end())
+        {
+            continue;
+        }
+
+        Player& other = playerIter->second;
+
+        if (other.GetZoneId() != 0)
+        {
+            continue;
+        }
+
+        if (InRange(x, y, other.GetX(), other.GetY()) == false)
+        {
+            continue;
+        }
+
+        other.GetViewList().insert(houseId);
+        house.GetWatchers().insert(id);
+        spawnSends.emplace_back(id, houseSpawn);
+    }
+
+    reason = 0;
+    return true;
+}
+
+// 월드에서 빠져 집 안 존으로 들어간다.
+void GameServer::EnterHouse(Player& player, House& house,
+                            std::vector<std::pair<std::uint32_t, SC_SPAWN_PACKET>>& spawnSends,
+                            std::vector<std::pair<std::uint32_t, SC_DESPAWN_PACKET>>& despawnSends)
+{
+    const std::uint32_t myId = player.GetId();
+
+    sectorGrid.Remove(myId, player.GetX(), player.GetY());
+    ClearView(player, despawnSends);
+
+    player.SetZoneId(house.GetId());
+    player.SetPosition(0.0f, HOUSE_ENTRY_Y);   // 집 안은 월드와 다른 좌표계다
+    player.SetInput(0.0f, 0.0f);
+
+    SC_SPAWN_PACKET selfSpawn = MakeSpawnPacket(player);
+
+    // 같은 집에 있는 사람끼리는 거리를 따지지 않고 전부 보인다.
+    // 방 하나가 시야 범위보다 좁아서 공간을 나눌 이유가 없다.
+    for (auto& [otherId, other] : players)
+    {
+        if (otherId == myId || other.GetZoneId() != house.GetId())
+        {
+            continue;
+        }
+
+        player.GetViewList().insert(otherId);
+        other.GetViewList().insert(myId);
+
+        spawnSends.emplace_back(myId, MakeSpawnPacket(other));
+        spawnSends.emplace_back(otherId, selfSpawn);
+    }
+}
+
+// 집 안에서 나와 월드로 돌아간다.
+void GameServer::ExitHouse(Player& player,
+                           std::vector<std::pair<std::uint32_t, SC_SPAWN_PACKET>>& spawnSends,
+                           std::vector<std::pair<std::uint32_t, SC_DESPAWN_PACKET>>& despawnSends)
+{
+    ClearView(player, despawnSends);
+
+    // 자기 집 남쪽으로 나온다.
+    float x = 0.0f;
+    float y = 0.0f;
+
+    auto houseIter = houses.find(player.GetZoneId());
+
+    if (houseIter != houses.end())
+    {
+        // 문 바로 앞이 아니라 옆으로 비켜 세운다. 문 앞에 세우면 위로 걷던 입력이 남아 있을 때
+        // 나가자마자 다시 문에 닿아 도로 들어가 버린다.
+        x = houseIter->second.GetX() + HOUSE_EXIT_SIDE_OFFSET;
+        y = houseIter->second.GetY() - HOUSE_EXIT_OFFSET;
+    }
+
+    player.SetZoneId(0);
+    player.SetInDoorZone(false);
+    player.SetPosition(x, y);
+    player.SetInput(0.0f, 0.0f);
+
+    sectorGrid.Add(player.GetId(), x, y);
+    PopulateWorldView(player, spawnSends);
+}
+
+// 지금 보고 있는 것들과의 관계를 전부 끊는다. 존을 옮기기 직전에 부른다.
+void GameServer::ClearView(Player& player,
+                           std::vector<std::pair<std::uint32_t, SC_DESPAWN_PACKET>>& despawnSends)
+{
+    const std::uint32_t myId = player.GetId();
+
+    SC_DESPAWN_PACKET despawnMe{};
+    despawnMe.size = sizeof(SC_DESPAWN_PACKET);
+    despawnMe.type = PACKET_TYPE::SC_DESPAWN;
+    despawnMe.id = myId;
+
+    for (std::uint32_t otherId : player.GetViewList())
+    {
+        SC_DESPAWN_PACKET despawnOther{};
+        despawnOther.size = sizeof(SC_DESPAWN_PACKET);
+        despawnOther.type = PACKET_TYPE::SC_DESPAWN;
+        despawnOther.id = otherId;
+
+        despawnSends.emplace_back(myId, despawnOther);   // 나에게: 상대를 지운다
+
+        if (IsMonsterId(otherId))
+        {
+            auto monsterIter = monsters.find(otherId);
+
+            if (monsterIter != monsters.end())
+            {
+                monsterIter->second.GetWatchers().erase(myId);
+            }
+
+            continue;
+        }
+
+        if (IsHouseId(otherId))
+        {
+            auto houseIter = houses.find(otherId);
+
+            if (houseIter != houses.end())
+            {
+                houseIter->second.GetWatchers().erase(myId);
+            }
+
+            continue;
+        }
+
+        auto otherIter = players.find(otherId);
+
+        if (otherIter != players.end())
+        {
+            otherIter->second.GetViewList().erase(myId);
+            despawnSends.emplace_back(otherId, despawnMe);   // 상대에게: 나를 지운다
+        }
+    }
+
+    player.GetViewList().clear();
+}
+
+// 지금 서 있는 자리 주변을 서로 보이게 만든다. 로그인 직후의 시야 구성과 같은 일이다.
+void GameServer::PopulateWorldView(Player& self,
+                                   std::vector<std::pair<std::uint32_t, SC_SPAWN_PACKET>>& spawnSends)
+{
+    const std::uint32_t myId = self.GetId();
+
+    SC_SPAWN_PACKET selfSpawn = MakeSpawnPacket(self);
+
+    std::vector<std::uint32_t> nearby;
+    sectorGrid.GatherNearby(self.GetX(), self.GetY(), nearby);
+
+    for (std::uint32_t otherId : nearby)
+    {
+        if (otherId == myId)
+        {
+            continue;
+        }
+
+        if (IsMonsterId(otherId))
+        {
+            auto monsterIter = monsters.find(otherId);
+
+            if (monsterIter == monsters.end()) { continue; }
+
+            Monster& monster = monsterIter->second;
+
+            if (InRange(self.GetX(), self.GetY(), monster.GetX(), monster.GetY()) == false) { continue; }
+
+            self.GetViewList().insert(otherId);
+            monster.GetWatchers().insert(myId);
+            spawnSends.emplace_back(myId, MakeSpawnPacket(monster));
+            continue;
+        }
+
+        if (IsHouseId(otherId))
+        {
+            auto houseIter = houses.find(otherId);
+
+            if (houseIter == houses.end()) { continue; }
+
+            House& house = houseIter->second;
+
+            if (InRange(self.GetX(), self.GetY(), house.GetX(), house.GetY()) == false) { continue; }
+
+            self.GetViewList().insert(otherId);
+            house.GetWatchers().insert(myId);
+            spawnSends.emplace_back(myId, MakeSpawnPacket(house));
+            continue;
+        }
+
+        auto otherIter = players.find(otherId);
+
+        if (otherIter == players.end()) { continue; }
+
+        Player& other = otherIter->second;
+
+        if (other.GetZoneId() != 0) { continue; }   // 집 안에 있는 사람은 월드에서 안 보인다
+        if (InViewRange(self, other) == false) { continue; }
+
+        self.GetViewList().insert(otherId);
+        other.GetViewList().insert(myId);
+
+        spawnSends.emplace_back(myId, MakeSpawnPacket(other));
+        spawnSends.emplace_back(otherId, selfSpawn);
+    }
+}
+
+// (x, y)가 어느 집 문 앞에 닿아 있는가.
+// 문은 집 남쪽 벽 한가운데다. 집이 이동을 막으므로 플레이어는 벽에서 PLAYER_RADIUS만큼
+// 떨어진 선까지만 올 수 있고, 그 선에 문 폭 안에서 닿으면 들어간 것으로 본다.
+bool GameServer::IsAtHouseDoor(float x, float y, std::uint32_t& outHouseId)
+{
+    std::vector<std::uint32_t> nearby;
+    sectorGrid.GatherNearby(x, y, nearby);
+
+    for (std::uint32_t id : nearby)
+    {
+        if (IsHouseId(id) == false)
+        {
+            continue;
+        }
+
+        auto houseIter = houses.find(id);
+
+        if (houseIter == houses.end())
+        {
+            continue;
+        }
+
+        const House& house = houseIter->second;
+
+        // 문 폭 안인가
+        if (std::fabs(x - house.GetX()) > HOUSE_DOOR_HALF_WIDTH)
+        {
+            continue;
+        }
+
+        // 집의 남쪽에서 접근했는가. 위/옆에서 벽을 밀고 있는 건 문이 아니다.
+        const float gap = house.GetY() - y;
+
+        if (gap <= 0.0f || gap > HOUSE_DOOR_REACH)
+        {
+            continue;
+        }
+
+        outHouseId = id;
+        return true;
+    }
+
+    return false;
+}
+
+// (x, y)에 서면 집에 파묻히는가. 집을 실체로 만들어 이동을 막는 데 쓴다.
+bool GameServer::IsBlockedByHouse(float x, float y)
+{
+    std::vector<std::uint32_t> nearby;
+    sectorGrid.GatherNearby(x, y, nearby);
+
+    // 플레이어를 점이 아니라 반지름을 가진 것으로 본다. 안 그러면 몸이 벽에 반쯤 박힌다.
+    const float reach = HOUSE_HALF + PLAYER_RADIUS;
+
+    for (std::uint32_t id : nearby)
+    {
+        if (IsHouseId(id) == false)
+        {
+            continue;
+        }
+
+        auto houseIter = houses.find(id);
+
+        if (houseIter == houses.end())
+        {
+            continue;
+        }
+
+        if (std::fabs(x - houseIter->second.GetX()) < reach &&
+            std::fabs(y - houseIter->second.GetY()) < reach)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 // 휘두른 부채꼴에 든 살아있는 몬스터를 모은다.
 // 주변 3x3 섹터만 훑으므로 월드에 몬스터가 많아져도 비용이 늘지 않는다.
 void GameServer::GatherMonstersInArc(float originX, float originY, float dirX, float dirY,
@@ -1631,6 +2333,18 @@ void GameServer::DisconnectPlayer(std::uint32_t playerId)
                     }
 
                     continue;
+                }
+
+                if (IsHouseId(otherId))
+                {
+                    auto houseIter = houses.find(otherId);
+
+                    if (houseIter != houses.end())
+                    {
+                        houseIter->second.GetWatchers().erase(playerId);
+                    }
+
+                    continue;   // 집은 그대로 둔다. 주인이 나가도 월드에 남는다
                 }
 
                 auto otherIter = players.find(otherId);

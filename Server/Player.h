@@ -43,6 +43,16 @@ public:
     std::chrono::steady_clock::time_point GetLastAttackAt() const { return lastAttackAt; }
     void SetLastAttackAt(std::chrono::steady_clock::time_point value) { lastAttackAt = value; }
 
+    // 지금 있는 존. 0이면 월드(바깥), 그 외에는 그 집의 id.
+    // 존이 다르면 서로 보이지 않는다. 집 안에 있는 동안은 섹터 격자에서 빠져 있다.
+    std::uint32_t GetZoneId() const { return zoneId; }
+    void SetZoneId(std::uint32_t value) { zoneId = value; }
+
+    // 문에 닿아 있는 상태인가. 닿는 '순간'에만 들어가게 하려고 둔다.
+    // 이게 없으면 문 앞에 서 있는 동안 매 틱 입장 처리가 돌아버린다.
+    bool IsInDoorZone() const { return inDoorZone; }
+    void SetInDoorZone(bool value) { inDoorZone = value; }
+
     void SetLoggedIn(bool newLoggedIn) { loggedIn = newLoggedIn; }
     void SetPosition(float newX, float newY) { x = newX; y = newY; }
     void SetName(const std::string& newName) { name = newName; }
@@ -65,4 +75,7 @@ private:
     float inputY = 0.0f;
 
     std::chrono::steady_clock::time_point lastAttackAt{};
+
+    std::uint32_t zoneId = 0;
+    bool inDoorZone = false;
 };

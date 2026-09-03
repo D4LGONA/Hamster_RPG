@@ -528,9 +528,11 @@ MonoBehaviour:
   serverIp: 127.0.0.1
   serverPort: 4000
   gameSceneName: GameScene
+  houseSceneName: HouseScene
   localPlayerPrefab: {fileID: 2746256444573331940, guid: 40e1e1f1df8fc464085f7cc6d1491935, type: 3}
   remotePlayerPrefab: {fileID: 2746256444573331940, guid: c3a050284b467144d80c4d7fb8705633, type: 3}
   monsterPrefab: {fileID: 2746256444573331940, guid: 0d78eeea0498c934abff65f267d17151, type: 3}
+  housePrefab: {fileID: 839143835887858831, guid: 30c46b3cc790c454f87e94d37f92e113, type: 3}
   enableNetworkLog: 1
 --- !u!4 &307746950
 Transform:
