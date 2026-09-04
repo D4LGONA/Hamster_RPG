@@ -27,9 +27,6 @@ public class NetworkClient : MonoBehaviour
     // 비워두면 코드가 임시 네모를 그린다. 프리팹을 꽂으면 그걸 쓴다.
     // 콜라이더는 필요 없다. 충돌은 서버가 판정한다.
     [SerializeField] private GameObject housePrefab;
-    // 비워두면 코드가 상태창을 만든다. 프리팹을 꽂으면 그걸 쓴다.
-    // Tools > Hamster > 상태창 프리팹 만들기 로 만들 수 있다.
-    [SerializeField] private GameObject statusPanelPrefab;
 
     [Header("Debug")]
     [SerializeField] private bool enableNetworkLog = true;
@@ -246,9 +243,6 @@ public class NetworkClient : MonoBehaviour
         {
             HouseRoom.Build();
         }
-
-        // 상태창. 씬마다 새로 만든다(씬이 바뀌면 이전 것은 파괴되므로).
-        StatusPanelUI.Create(statusPanelPrefab);
 
         SpawnLocalPlayer();
         FlushPendingPackets();
