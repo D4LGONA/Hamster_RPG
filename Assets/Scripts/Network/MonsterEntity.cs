@@ -11,6 +11,10 @@ public class MonsterEntity : MonoBehaviour
     // 이 거리 이상 튀면 보간 대신 즉시 순간이동.
     [SerializeField] private float snapDistance = 5.0f;
 
+    [Header("Health Bar")]
+    // 0이면 스프라이트 위쪽에 자동으로 붙인다. 값을 주면 그 높이로 고정한다.
+    [SerializeField] private float healthBarOffsetY = 0.0f;
+
     [Header("Combat Feedback")]
     // 맞았을 때 잠깐 이 색으로 번쩍인다.
     [SerializeField] private Color hitFlashColor = new Color(1.0f, 0.4f, 0.4f);
@@ -27,7 +31,7 @@ public class MonsterEntity : MonoBehaviour
     private Color baseColor = Color.white;
     private float flashRemain;
 
-    private MonsterHealthBar healthBar;
+    private WorldHealthBar healthBar;
 
     private int hp;
     private int maxHp;
@@ -179,7 +183,9 @@ public class MonsterEntity : MonoBehaviour
         }
     }
 
-    // 체력바는 처음 맞았을 때 만든다. 안 그러면 멀쩡한 몬스터 머리 위에까지 바가 떠서 지저분하다.
+    // 프리팹에 체력바를 넣어뒀으면 그걸 쓰고, 없으면 처음 맞았을 때 코드로 만든다.
+    // 코드로 만드는 쪽을 첫 피격까지 미루는 이유는, 멀쩡한 몬스터 머리 위에까지
+    // 바가 떠 있으면 지저분하기 때문이다.
     private void EnsureHealthBar()
     {
         if (healthBar != null)
@@ -187,7 +193,13 @@ public class MonsterEntity : MonoBehaviour
             return;
         }
 
-        healthBar = gameObject.AddComponent<MonsterHealthBar>();
-        healthBar.Build(spriteRenderer);
+        healthBar = GetComponentInChildren<WorldHealthBar>(true);
+
+        if (healthBar == null)
+        {
+            healthBar = gameObject.AddComponent<WorldHealthBar>();
+        }
+
+        healthBar.Build(spriteRenderer, healthBarOffsetY);
     }
 }

@@ -38,14 +38,31 @@ public class StatusPanelUI : MonoBehaviour
 
     private int lastStatVersion = -1;
 
-    // 씬에 이미 구워둔 상태창이 있으면 그걸 쓰고, 없으면 코드로 만든다.
-    public static StatusPanelUI Create()
+    // 찾는 순서: 씬에 이미 있는 것 -> 프리팹 -> 코드로 만들기.
+    // 어느 쪽이든 결과는 같은 구조라 아래 표시 코드는 신경 쓸 필요가 없다.
+    public static StatusPanelUI Create(GameObject prefab)
     {
         StatusPanelUI existing = FindObjectOfType<StatusPanelUI>();
 
         if (existing != null)
         {
             return existing;
+        }
+
+        if (prefab != null)
+        {
+            GameObject obj = Instantiate(prefab);
+            obj.name = "StatusPanelUI";
+
+            StatusPanelUI fromPrefab = obj.GetComponent<StatusPanelUI>();
+
+            if (fromPrefab != null)
+            {
+                return fromPrefab;
+            }
+
+            Debug.LogWarning("[상태창] 프리팹에 StatusPanelUI 컴포넌트가 없습니다. 코드로 만듭니다.");
+            Destroy(obj);
         }
 
         GameObject root = new GameObject("StatusPanelUI");
