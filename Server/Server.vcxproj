@@ -148,6 +148,12 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="GameServer.cpp" />
+    <ClCompile Include="GameServer_Packet.cpp" />
+    <ClCompile Include="GameServer_View.cpp" />
+    <ClCompile Include="GameServer_Monster.cpp" />
+    <ClCompile Include="GameServer_Combat.cpp" />
+    <ClCompile Include="GameServer_House.cpp" />
+    <ClCompile Include="GameServer_Tick.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="Player.cpp" />
     <ClCompile Include="Session.cpp" />
