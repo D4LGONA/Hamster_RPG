@@ -12,6 +12,13 @@
 #include "House.h"
 #include "SectorGrid.h"
 
+enum class PACKET_CHECK
+{
+    OK,         // 패킷 하나 완성
+    NEED_MORE,  // 덜 옴 → 기다리기
+    BROKEN      // 망가짐 → 끊기
+};
+
 class GameServer
 {
 public:
@@ -35,8 +42,8 @@ private:
     void PostAccept();
     void WorkerThread();
 
-    void ProcessPacket(std::uint32_t playerId, const char* data, int bytes);
-    bool ReadPacketInfo(const char* data, int bytes, std::uint16_t& packetSize, PACKET_TYPE& packetType);
+    int ProcessPacket(std::uint32_t playerId, const char* data, int bytes);
+    PACKET_CHECK ReadPacketInfo(const char* data, int bytes, std::uint16_t& packetSize, PACKET_TYPE& packetType);
 
     void ProcessLogin(std::uint32_t playerId, const CS_LOGIN_PACKET* packet);
     void ProcessInput(std::uint32_t playerId, const CS_INPUT_PACKET* packet);

@@ -66,6 +66,9 @@ enum class PACKET_TYPE : std::uint16_t
     SC_HOUSE_RESULT,   // 16  설치 시도 결과
 };
 
+// 모든 패킷 맨 앞에 붙는 헤더(size + type)의 크기. 4바이트.
+constexpr int PACKET_HEADER_SIZE = sizeof(std::uint16_t) + sizeof(PACKET_TYPE);
+
 #pragma pack(push, 1)
 // ==============================
 // Client -> Server

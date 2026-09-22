@@ -7,7 +7,7 @@ bool Session::Recv()
 {
     if (socket == INVALID_SOCKET) return false;
 
-    recvOver.SetupRecv();
+    recvOver.SetupRecv(savedBytes);
 
     DWORD recvBytes = 0;
     DWORD flags = 0;

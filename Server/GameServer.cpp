@@ -215,14 +215,34 @@ void GameServer::WorkerThread()
                 continue;
             }
 
-            ProcessPacket(playerId, extOver->buffer, static_cast<int>(numBytes));
-
             Session* session = FindSession(playerId);
+            if (session == nullptr) continue;
 
-            if (session != nullptr && session->Recv() == false)
+            // 버퍼 = [지난번에 남은 꼬리 | 이번에 받은 바이트]. 둘을 합친 길이만큼 처리한다.
+            int total = session->GetSavedBytes() + static_cast<int>(numBytes);
+            int processed = ProcessPacket(playerId, extOver->buffer, total);
+
+            // 망가진 패킷 → 더 기다려도 소용없으니 끊는다.
+            if (processed < 0)
             {
                 DisconnectPlayer(playerId);
+                continue;
             }
+
+            // ProcessPacket 안에서 로그아웃됐을 수 있으니 세션을 다시 찾는다.
+            session = FindSession(playerId);
+            if (session == nullptr) continue;
+
+            // 덜 온 꼬리는 버퍼 맨 앞으로 당겨 둔다. (앞뒤 구간이 겹칠 수 있어서 memmove)
+            int remain = total - processed;
+            if (remain > 0)
+                std::memmove(extOver->buffer, extOver->buffer + processed, remain);
+
+            // 꼬리 길이를 기억해 두면 다음 Recv가 그 뒤에 이어서 받는다.
+            session->SetSavedBytes(remain);
+
+            if (session->Recv() == false)
+                DisconnectPlayer(playerId);
 
             // RECV extOver는 Session 멤버 recvOver라서 delete 하지 않는다.
         }
@@ -233,35 +253,36 @@ void GameServer::WorkerThread()
     }
 }
 
-bool GameServer::ReadPacketInfo(const char* data, int bytes, std::uint16_t& packetSize, PACKET_TYPE& packetType)
+PACKET_CHECK GameServer::ReadPacketInfo(const char* data, int bytes, std::uint16_t& packetSize, PACKET_TYPE& packetType)
 {
     if (data == nullptr)
-    {
-        return false;
-    }
+        return PACKET_CHECK::BROKEN;
 
-    if (bytes < static_cast<int>(sizeof(std::uint16_t) + sizeof(PACKET_TYPE)))
-    {
-        return false;
-    }
+    // 헤더(size + type)조차 다 안 옴 → 다음 Recv 기다리기
+    if (bytes < PACKET_HEADER_SIZE)
+        return PACKET_CHECK::NEED_MORE;
 
     std::memcpy(&packetSize, data, sizeof(std::uint16_t));
     std::memcpy(&packetType, data + sizeof(std::uint16_t), sizeof(PACKET_TYPE));
 
-    if (packetSize < sizeof(std::uint16_t) + sizeof(PACKET_TYPE))
-    {
-        return false;
-    }
+    // 적힌 크기가 헤더보다 작음 → 말이 안 되는 패킷
+    if (packetSize < PACKET_HEADER_SIZE)
+        return PACKET_CHECK::BROKEN;
 
+    // 적힌 크기가 너무 큼 → 말이 안 되는 패킷
+    if (packetSize > BUFSIZE)
+        return PACKET_CHECK::BROKEN;
+
+    // 헤더는 왔지만 몸통이 덜 옴 → 다음 Recv 기다리기
     if (packetSize > bytes)
-    {
-        return false;
-    }
+        return PACKET_CHECK::NEED_MORE;
 
-    return true;
+    return PACKET_CHECK::OK;
 }
 
-void GameServer::ProcessPacket(std::uint32_t playerId, const char* data, int bytes)
+// 버퍼 앞에서부터 완성된 패킷만 처리하고, 처리한 바이트 수를 돌려준다.
+// 망가진 패킷을 만나면 -1.
+int GameServer::ProcessPacket(std::uint32_t playerId, const char* data, int bytes)
 {
     int offset = 0;
 
@@ -270,10 +291,11 @@ void GameServer::ProcessPacket(std::uint32_t playerId, const char* data, int byt
         std::uint16_t packetSize = 0;
         PACKET_TYPE packetType{};
 
-        if (ReadPacketInfo(data + offset, bytes - offset, packetSize, packetType) == false)
-        {
-            return;
-        }
+        PACKET_CHECK check = ReadPacketInfo(data + offset, bytes - offset, packetSize, packetType);
+        if (check == PACKET_CHECK::BROKEN)
+            return -1;
+        if (check == PACKET_CHECK::NEED_MORE)
+            break; // 여기까지 처리한 양(offset)을 돌려주고, 나머지는 꼬리로 남긴다.
 
         const char* packetData = data + offset;
 
@@ -281,44 +303,32 @@ void GameServer::ProcessPacket(std::uint32_t playerId, const char* data, int byt
         {
         case PACKET_TYPE::CS_LOGIN:
             if (packetSize == sizeof(CS_LOGIN_PACKET))
-            {
                 ProcessLogin(playerId, reinterpret_cast<const CS_LOGIN_PACKET*>(packetData));
-            }
             break;
 
         case PACKET_TYPE::CS_CHAT:
             if (packetSize == sizeof(CS_CHAT_PACKET))
-            {
                 ProcessChat(playerId, reinterpret_cast<const CS_CHAT_PACKET*>(packetData));
-            }
             break;
 
         case PACKET_TYPE::CS_INPUT:
             if (packetSize == sizeof(CS_INPUT_PACKET))
-            {
                 ProcessInput(playerId, reinterpret_cast<const CS_INPUT_PACKET*>(packetData));
-            }
             break;
 
         case PACKET_TYPE::CS_ATTACK:
             if (packetSize == sizeof(CS_ATTACK_PACKET))
-            {
                 ProcessAttack(playerId, reinterpret_cast<const CS_ATTACK_PACKET*>(packetData));
-            }
             break;
 
         case PACKET_TYPE::CS_HOUSE_ACTION:
             if (packetSize == sizeof(CS_HOUSE_ACTION_PACKET))
-            {
                 ProcessHouseAction(playerId);
-            }
             break;
 
         case PACKET_TYPE::CS_LOGOUT:
             if (packetSize == sizeof(CS_LOGOUT_PACKET))
-            {
                 DisconnectPlayer(playerId);
-            }
             break;
 
         default:
@@ -327,6 +337,8 @@ void GameServer::ProcessPacket(std::uint32_t playerId, const char* data, int byt
 
         offset += packetSize;
     }
+
+    return offset;
 }
 
 // playersLock을 잡은 상태에서 호출할 것.

@@ -25,7 +25,8 @@ struct EXT_OVER
 
     EXT_OVER()
     {
-        SetupRecv();
+        Reset();
+        ioType = IO_TYPE::RECV;
     }
 
     void Reset()
@@ -44,9 +45,15 @@ struct EXT_OVER
         acceptSocket = socket;
     }
 
-    void SetupRecv()
+    // savedBytes: 버퍼 앞에 남겨 둔 꼬리 길이. 그 뒤부터, 남은 칸만큼만 받는다.
+    // Reset()을 부르면 꼬리가 지워지므로 overlapped만 초기화한다.
+    void SetupRecv(int savedBytes)
     {
-        Reset();
+        ZeroMemory(&overlapped, sizeof(overlapped));
+
+        wsabuf.buf = buffer + savedBytes;
+        wsabuf.len = BUFSIZE - savedBytes;
+
         ioType = IO_TYPE::RECV;
     }
 

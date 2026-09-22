@@ -33,9 +33,13 @@ public:
         }
     }
 
+	int GetSavedBytes() const { return savedBytes; }
+	void SetSavedBytes(int bytes) { savedBytes = bytes; }
+
 private:
     SOCKET socket = INVALID_SOCKET;
     std::uint32_t playerId = 0;
+    int savedBytes = 0; // 처리 못 하고 recv 버퍼 앞쪽에 남아 있는 바이트 수 (덜 온 패킷)
 
     EXT_OVER recvOver;
 };
