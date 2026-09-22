@@ -176,28 +176,25 @@ void GameServer::WorkerThread()
 
             std::uint32_t playerId = IssuePlayerId();
 
-            auto session = std::make_unique<Session>(clientSocket);
+            auto session = std::make_shared<Session>(clientSocket);
             session->SetPlayerId(playerId);
 
             if (CreateIoCompletionPort(reinterpret_cast<HANDLE>(clientSocket), iocpHandle, playerId, 0) == nullptr)
             {
                 PrintServerError("CreateIoCompletionPort client socket failed");
-                closesocket(clientSocket);
                 delete extOver;
                 PostAccept();
                 continue;
             }
 
-            Session* sessionPtr = session.get();
-
             {
                 std::lock_guard<std::mutex> lock(sessionsLock);
-                sessions.emplace(playerId, std::move(session));
+                sessions.emplace(playerId, session);
             }
 
             std::cout << "[ACCEPT] playerId = " << playerId << std::endl;
 
-            if (sessionPtr->Recv() == false)
+            if (session->Recv() == false)
             {
                 DisconnectPlayer(playerId);
             }
@@ -215,7 +212,7 @@ void GameServer::WorkerThread()
                 continue;
             }
 
-            Session* session = FindSession(playerId);
+            std::shared_ptr<Session> session = FindSession(playerId);
             if (session == nullptr) continue;
 
             // 버퍼 = [지난번에 남은 꼬리 | 이번에 받은 바이트]. 둘을 합친 길이만큼 처리한다.
@@ -2404,18 +2401,15 @@ void GameServer::DisconnectPlayer(std::uint32_t playerId)
     std::cout << "[DISCONNECT] id = " << playerId << ", despawn to " << viewers.size() << std::endl;
 }
 
-Session* GameServer::FindSession(std::uint32_t playerId)
+std::shared_ptr<Session> GameServer::FindSession(std::uint32_t playerId)
 {
     std::lock_guard<std::mutex> lock(sessionsLock);
 
     auto iter = sessions.find(playerId);
 
-    if (iter == sessions.end())
-    {
-        return nullptr;
-    }
+    if (iter == sessions.end()) return nullptr;
 
-    return iter->second.get();
+    return iter->second;
 }
 
 std::uint32_t GameServer::IssuePlayerId()

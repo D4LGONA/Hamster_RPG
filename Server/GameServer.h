@@ -133,7 +133,7 @@ private:
 
     void DisconnectPlayer(std::uint32_t playerId);
 
-    Session* FindSession(std::uint32_t playerId);
+    std::shared_ptr<Session> FindSession(std::uint32_t playerId);
     std::uint32_t IssuePlayerId();
     void PrintServerError(const char* message);
 
@@ -149,7 +149,7 @@ private:
 
     // 추후 concurrency로 바꿀지 고민.
     std::mutex sessionsLock;
-    std::unordered_map<std::uint32_t, std::unique_ptr<Session>> sessions;
+    std::unordered_map<std::uint32_t, std::shared_ptr<Session>> sessions;
 
     std::mutex playersLock;
     std::unordered_map<std::uint32_t, Player> players;
