@@ -131,7 +131,8 @@ private:
 
     void ReportTickProfile();   // 누적된 틱 프로파일을 찍고 리셋. 틱 스레드에서만 호출.
 
-    void DisconnectPlayer(std::uint32_t playerId);
+    void DisconnectPlayer(std::uint32_t playerId);   // 플레이어 정리 + 소켓 닫기 (세션은 안 지움)
+    void RemoveSession(std::uint32_t playerId);      // 세션을 map에서 지우기. Recv가 걸려 있지 않을 때만
 
     std::shared_ptr<Session> FindSession(std::uint32_t playerId);
     std::uint32_t IssuePlayerId();

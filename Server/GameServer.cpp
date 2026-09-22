@@ -154,6 +154,12 @@ void GameServer::WorkerThread()
                 if (key != 0)
                 {
                     DisconnectPlayer(static_cast<std::uint32_t>(key));
+
+                    // 실패한 게 Recv면 이게 그 세션의 마지막 Recv 완료다. 이제 지워도 안전하다.
+                    // (SEND 실패면 Recv가 아직 걸려 있으니 지우지 않는다. 그 Recv 완료 때 지워진다.)
+                    // 지운 뒤에는 extOver(= 세션 안의 recvOver)를 건드리면 안 된다.
+                    if (ioType == IO_TYPE::RECV)
+                        RemoveSession(static_cast<std::uint32_t>(key));
                 }
 
                 if (ioType == IO_TYPE::ACCEPT || ioType == IO_TYPE::SEND)
@@ -194,9 +200,11 @@ void GameServer::WorkerThread()
 
             std::cout << "[ACCEPT] playerId = " << playerId << std::endl;
 
+            // 첫 Recv부터 실패 → 걸린 Recv가 없으니 바로 지운다.
             if (session->Recv() == false)
             {
                 DisconnectPlayer(playerId);
+                RemoveSession(playerId);
             }
 
             delete extOver;
@@ -206,9 +214,11 @@ void GameServer::WorkerThread()
         {
             std::uint32_t playerId = static_cast<std::uint32_t>(key);
 
+            // 상대가 연결을 끊음 → Recv를 다시 걸지 않으니 여기서 지운다.
             if (numBytes == 0)
             {
                 DisconnectPlayer(playerId);
+                RemoveSession(playerId);
                 continue;
             }
 
@@ -223,6 +233,7 @@ void GameServer::WorkerThread()
             if (processed < 0)
             {
                 DisconnectPlayer(playerId);
+                RemoveSession(playerId);
                 continue;
             }
 
@@ -238,8 +249,13 @@ void GameServer::WorkerThread()
             // 꼬리 길이를 기억해 두면 다음 Recv가 그 뒤에 이어서 받는다.
             session->SetSavedBytes(remain);
 
+            // 다시 건 Recv가 바로 실패 → 걸린 Recv가 없으니 바로 지운다.
+            // (로그아웃도 여기로 온다: DisconnectPlayer가 소켓을 닫아 둬서 Recv가 실패함)
             if (session->Recv() == false)
+            {
                 DisconnectPlayer(playerId);
+                RemoveSession(playerId);
+            }
 
             // RECV extOver는 Session 멤버 recvOver라서 delete 하지 않는다.
         }
@@ -2378,8 +2394,11 @@ void GameServer::DisconnectPlayer(std::uint32_t playerId)
 
         if (iter != sessions.end())
         {
-            sessions.erase(iter);
-            existed = true;
+            // 여기서는 소켓만 닫고 map에서 지우지 않는다.
+            // 걸려 있던 Recv가 실패로 완료되면 워커가 RemoveSession으로 지운다.
+            // (지금 지우면 그 Recv의 recvOver가 세션과 함께 사라져서, 완료 통지가 지워진 메모리로 온다)
+            // existed는 건드리지 않는다. 한 사람에게 두 번 불려도 로그가 한 번만 찍히게.
+            iter->second->Close();
         }
     }
 
@@ -2420,4 +2439,18 @@ std::uint32_t GameServer::IssuePlayerId()
 void GameServer::PrintServerError(const char* message)
 {
     std::cout << "[SERVER ERROR] " << message << ", error = " << WSAGetLastError() << std::endl;
+}
+
+// 세션을 map에서 지운다. Recv가 걸려 있지 않을 때만 불러야 한다.
+// (= Recv 완료를 처리하면서 다시 걸지 않을 때, 또는 Recv를 거는 데 실패했을 때)
+void GameServer::RemoveSession(std::uint32_t playerId)
+{
+    std::lock_guard<std::mutex> lock(sessionsLock);
+
+    auto iter = sessions.find(playerId);
+    if (iter != sessions.end())
+    {
+        sessions.erase(iter);
+        std::cout << "[SESSION REMOVED] playerId = " << playerId << std::endl;
+    }
 }
