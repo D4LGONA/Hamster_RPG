@@ -10,6 +10,7 @@
 #include "Player.h"
 #include "Monster.h"
 #include "House.h"
+#include "Furniture.h"
 #include "SectorGrid.h"
 
 enum class PACKET_CHECK
@@ -71,7 +72,8 @@ private:
     static bool WithinRadius(float ax, float ay, float bx, float by, float radius);   // 반경 지정 거리 비교(sqrt 없이)
 
     // 몬스터: 별도 맵으로 관리하되 섹터그리드/시야엔 함께 태운다.
-    static bool IsMonsterId(std::uint32_t id) { return id >= MONSTER_ID_BASE; }
+    // 위쪽 경계(FURNITURE_ID_BASE)가 꼭 있어야 한다. 없으면 가구 id까지 몬스터로 판정된다.
+    static bool IsMonsterId(std::uint32_t id) { return id >= MONSTER_ID_BASE && id < FURNITURE_ID_BASE; }
     bool GetEntityPosition(std::uint32_t id, float& x, float& y);   // player/monster 공통 위치 조회
     void SpawnInitialMonsters();
 
@@ -164,12 +166,23 @@ private:
 
     // 집. 몬스터와 마찬가지로 playersLock으로 players/sectorGrid와 함께 보호한다.
     // id 대역을 나눠 놓아서 id만 보고 무엇인지 구분한다.
-    //   1 ~ 999,999          플레이어
+    //   1 ~ 999,999           플레이어
     //   1,000,000 ~ 1,999,999 집
-    //   2,000,000 이상        몬스터
+    //   2,000,000 ~ 2,999,999 몬스터
+    //   3,000,000 이상         가구
     static constexpr std::uint32_t HOUSE_ID_BASE = 1000000;
     std::uint32_t nextHouseId = HOUSE_ID_BASE;
     std::unordered_map<std::uint32_t, House> houses;
+
+    // 가구. 집 안에만 존재해서 섹터 격자에는 안 들어가지만,
+    // houses/players와 같이 바뀌므로 락은 playersLock을 함께 쓴다.
+    static constexpr std::uint32_t FURNITURE_ID_BASE = 3000000;
+    std::uint32_t nextFurnitureId = FURNITURE_ID_BASE;
+    std::unordered_map<std::uint32_t, Furniture> furnitures;                        // id -> 가구
+
+    // houseId -> 그 집 가구 id들. 집에 들어갈 때 목록을 통째로 보내고,
+    // 충돌 검사도 같은 집 안에서만 하므로 매번 furnitures 전체를 훑지 않으려고 둔다.
+    std::unordered_map<std::uint32_t, std::vector<std::uint32_t>> houseFurnitures;
 
     static constexpr float HOUSE_HALF = HOUSE_SIZE * 0.5f;
 

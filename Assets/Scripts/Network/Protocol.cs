@@ -33,6 +33,52 @@ public static class Protocol
     public const float AttackCooldown = 0.8f;
     public const float AttackArcHalfDegrees = 50.0f;
 
+    // 2026-09-26: 건축(가구). 서버 protocol.h의 값과 같다.
+    // 판정은 전부 서버가 하고, 클라는 배치 미리보기를 그리는 데에만 쓴다.
+    public const uint FurnitureBed = 0;
+    public const uint FurnitureDesk = 1;
+    public const uint FurnitureChair = 2;
+    public const uint FurniturePot = 3;
+    public const uint FurnitureRug = 4;
+    public const uint FurnitureTypeCount = 5;
+
+    public const int MaxFurniturePerHouse = 30;
+    public const float FurnitureEntryClearRadius = 1.0f;
+    public const float FurnitureActionCooldown = 0.2f;
+
+    // 가구가 차지하는 크기(가로, 세로). 회전이 90/270도면 가로세로를 바꿔 본다.
+    // 이 파일은 UnityEngine에 의존하지 않으므로 Vector2 대신 자체 구조체를 쓴다.
+    public struct FurnitureSizeData
+    {
+        public float width;
+        public float height;
+
+        public FurnitureSizeData(float newWidth, float newHeight)
+        {
+            width = newWidth;
+            height = newHeight;
+        }
+    }
+
+    public static readonly FurnitureSizeData[] FurnitureSize =
+    {
+        new FurnitureSizeData(2.0f, 1.2f),   // 0 침대
+        new FurnitureSizeData(1.6f, 0.8f),   // 1 책상
+        new FurnitureSizeData(0.7f, 0.7f),   // 2 의자
+        new FurnitureSizeData(0.6f, 0.6f),   // 3 화분
+        new FurnitureSizeData(2.0f, 1.5f),   // 4 러그
+    };
+
+    // SC_FURNITURE_RESULT의 reason. 실패했을 때만 온다.
+    public const byte FurnitureFailNotInHouse = 1;
+    public const byte FurnitureFailNotOwner = 2;
+    public const byte FurnitureFailOutOfRoom = 3;
+    public const byte FurnitureFailOverlap = 4;
+    public const byte FurnitureFailBlocksEntry = 5;
+    public const byte FurnitureFailLimit = 6;
+    public const byte FurnitureFailBadType = 7;
+    public const byte FurnitureFailNoSuch = 8;
+
     private static readonly Encoding PacketEncoding = new UTF8Encoding(false);
 
     public enum PacketType : ushort
@@ -60,7 +106,16 @@ public static class Protocol
         // 2026-07-18: 하우징. 마찬가지로 맨 뒤에만 붙일 것.
         CS_HOUSE_ACTION = 14,
         SC_ZONE_CHANGE = 15,
-        SC_HOUSE_RESULT = 16
+        SC_HOUSE_RESULT = 16,
+
+        // 2026-09-26: 건축(가구). 마찬가지로 맨 뒤에만 붙일 것.
+        CS_FURNITURE_PLACE = 17,
+        CS_FURNITURE_REMOVE = 18,
+        CS_FURNITURE_MOVE = 19,
+        SC_FURNITURE_SPAWN = 20,
+        SC_FURNITURE_MOVED = 21,
+        SC_FURNITURE_REMOVED = 22,
+        SC_FURNITURE_RESULT = 23
     }
     public struct PlayerStatsData
     {
@@ -149,6 +204,47 @@ public static class Protocol
 
         int offset = 0;
         WriteHeader(packet, ref offset, PacketType.CS_HOUSE_ACTION);
+
+        return packet;
+    }
+
+    // 가구 요청 3종. houseId는 안 보낸다. 서버가 내 zoneId를 보고 어느 집인지 정한다.
+    // rotation은 0=0도, 1=90도, 2=180도, 3=270도.
+    public static byte[] MakeFurniturePlacePacket(uint itemType, float x, float y, byte rotation)
+    {
+        byte[] packet = new byte[HeaderSize + sizeof(uint) + sizeof(float) + sizeof(float) + sizeof(byte)];
+
+        int offset = 0;
+        WriteHeader(packet, ref offset, PacketType.CS_FURNITURE_PLACE);
+        WriteUInt(packet, ref offset, itemType);
+        WriteFloat(packet, ref offset, x);
+        WriteFloat(packet, ref offset, y);
+        WriteByte(packet, ref offset, rotation);
+
+        return packet;
+    }
+
+    public static byte[] MakeFurnitureRemovePacket(uint furnitureId)
+    {
+        byte[] packet = new byte[HeaderSize + sizeof(uint)];
+
+        int offset = 0;
+        WriteHeader(packet, ref offset, PacketType.CS_FURNITURE_REMOVE);
+        WriteUInt(packet, ref offset, furnitureId);
+
+        return packet;
+    }
+
+    public static byte[] MakeFurnitureMovePacket(uint furnitureId, float x, float y, byte rotation)
+    {
+        byte[] packet = new byte[HeaderSize + sizeof(uint) + sizeof(float) + sizeof(float) + sizeof(byte)];
+
+        int offset = 0;
+        WriteHeader(packet, ref offset, PacketType.CS_FURNITURE_MOVE);
+        WriteUInt(packet, ref offset, furnitureId);
+        WriteFloat(packet, ref offset, x);
+        WriteFloat(packet, ref offset, y);
+        WriteByte(packet, ref offset, rotation);
 
         return packet;
     }
@@ -245,6 +341,19 @@ public static class Protocol
         byte[] bytes = BitConverter.GetBytes(value);
         Buffer.BlockCopy(bytes, 0, buffer, offset, bytes.Length);
         offset += bytes.Length;
+    }
+
+    private static void WriteUInt(byte[] buffer, ref int offset, uint value)
+    {
+        byte[] bytes = BitConverter.GetBytes(value);
+        Buffer.BlockCopy(bytes, 0, buffer, offset, bytes.Length);
+        offset += bytes.Length;
+    }
+
+    private static void WriteByte(byte[] buffer, ref int offset, byte value)
+    {
+        buffer[offset] = value;
+        offset += sizeof(byte);
     }
 
     private static void WriteFloat(byte[] buffer, ref int offset, float value)

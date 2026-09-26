@@ -37,6 +37,55 @@ constexpr float HOUSE_INTERIOR_HALF_X = 4.5f;
 constexpr float HOUSE_INTERIOR_HALF_Y = 4.5f;
 constexpr float HOUSE_ENTRY_Y = -3.0f;   // 들어갔을 때 서는 자리(아래쪽)
 
+// 2026-09-26: 건축(가구). 설계는 Docs/FurnitureDesign.md.
+// 가구는 집 안에만 존재하고 월드에는 나가지 않는다.
+
+// 가구 종류. 클라는 프리팹을 고르는 값으로, 서버는 크기 표의 인덱스로 쓴다.
+constexpr std::uint32_t FURNITURE_BED = 0;
+constexpr std::uint32_t FURNITURE_DESK = 1;
+constexpr std::uint32_t FURNITURE_CHAIR = 2;
+constexpr std::uint32_t FURNITURE_POT = 3;
+constexpr std::uint32_t FURNITURE_RUG = 4;
+constexpr std::uint32_t FURNITURE_TYPE_COUNT = 5;
+
+struct FurnitureSize
+{
+    float width;
+    float height;
+};
+
+// 가구가 차지하는 크기. 회전이 90/270도면 가로세로를 바꿔 본다(Furniture::GetHalfExtent).
+// 충돌/범위 판정은 서버만 하고, 클라는 배치 미리보기를 그리는 데 쓴다.
+// 방이 ±4.5(가로세로 9)이므로 침대가 방의 약 1/4 폭이다.
+constexpr FurnitureSize FURNITURE_SIZE[FURNITURE_TYPE_COUNT] =
+{
+    { 2.0f, 1.2f },   // 0 침대
+    { 1.6f, 0.8f },   // 1 책상
+    { 0.7f, 0.7f },   // 2 의자
+    { 0.6f, 0.6f },   // 3 화분
+    { 2.0f, 1.5f },   // 4 러그
+};
+
+// 집 하나당 가구 개수 한도.
+constexpr int MAX_FURNITURE_PER_HOUSE = 30;
+
+// 들어왔을 때 서는 자리(HOUSE_ENTRY_Y) 주변 이 반경에는 못 놓는다.
+// 안 막으면 자기 집에 들어가자마자 가구에 끼어서 못 움직이는 상황이 생긴다.
+constexpr float FURNITURE_ENTRY_CLEAR_RADIUS = 1.0f;
+
+// 가구 요청 연타 방지. 같은 사람의 설치/이동/삭제 요청은 이 간격보다 촘촘하면 무시한다.
+constexpr float FURNITURE_ACTION_COOLDOWN = 0.2f;
+
+// SC_FURNITURE_RESULT의 reason. 실패했을 때만 보낸다(성공은 SPAWN/MOVED/REMOVED가 곧 성공 신호).
+constexpr std::uint8_t FURNITURE_FAIL_NOT_IN_HOUSE = 1;   // 집 안이 아님
+constexpr std::uint8_t FURNITURE_FAIL_NOT_OWNER = 2;      // 내 집이 아님
+constexpr std::uint8_t FURNITURE_FAIL_OUT_OF_ROOM = 3;    // 방 밖으로 나감
+constexpr std::uint8_t FURNITURE_FAIL_OVERLAP = 4;        // 다른 가구와 겹침
+constexpr std::uint8_t FURNITURE_FAIL_BLOCKS_ENTRY = 5;   // 출입구를 막음
+constexpr std::uint8_t FURNITURE_FAIL_LIMIT = 6;          // 개수 한도 초과
+constexpr std::uint8_t FURNITURE_FAIL_BAD_TYPE = 7;       // 알 수 없는 가구 종류
+constexpr std::uint8_t FURNITURE_FAIL_NO_SUCH = 8;        // 그런 가구 없음(id 오류)
+
 
 enum class PACKET_TYPE : std::uint16_t
 {
@@ -64,6 +113,15 @@ enum class PACKET_TYPE : std::uint16_t
     CS_HOUSE_ACTION,   // 14  T키. 설치/입장/퇴장은 서버가 상황 보고 정한다
     SC_ZONE_CHANGE,    // 15  존이 바뀌었다(월드 <-> 집 안). 클라는 씬을 바꾼다
     SC_HOUSE_RESULT,   // 16  설치 시도 결과
+
+    // 2026-09-26: 건축(가구). 마찬가지로 맨 뒤에만 붙일 것.
+    CS_FURNITURE_PLACE,    // 17  설치 요청
+    CS_FURNITURE_REMOVE,   // 18  삭제 요청
+    CS_FURNITURE_MOVE,     // 19  이동(회전 포함) 요청
+    SC_FURNITURE_SPAWN,    // 20  가구가 생겼다 / 집에 들어와서 받는 목록
+    SC_FURNITURE_MOVED,    // 21  가구가 움직였다
+    SC_FURNITURE_REMOVED,  // 22  가구가 사라졌다
+    SC_FURNITURE_RESULT,   // 23  요청 실패 사유 (요청자에게만)
 };
 
 // 모든 패킷 맨 앞에 붙는 헤더(size + type)의 크기. 4바이트.
@@ -99,6 +157,43 @@ struct CS_HOUSE_ACTION_PACKET
 {
     std::uint16_t size;
     PACKET_TYPE type;
+};
+
+// 가구 요청 3종. houseId는 받지 않는다.
+// 서버가 요청자의 zoneId를 보면 어느 집인지 알 수 있고,
+// 클라가 보낸 houseId를 믿으면 남의 집에 설치하는 요청을 막을 수 없다.
+struct CS_FURNITURE_PLACE_PACKET
+{
+    std::uint16_t size;
+    PACKET_TYPE type;
+
+    std::uint32_t itemType;
+
+    float x;
+    float y;
+
+    std::uint8_t rotation;   // 0~3
+};
+
+struct CS_FURNITURE_REMOVE_PACKET
+{
+    std::uint16_t size;
+    PACKET_TYPE type;
+
+    std::uint32_t furnitureId;
+};
+
+struct CS_FURNITURE_MOVE_PACKET
+{
+    std::uint16_t size;
+    PACKET_TYPE type;
+
+    std::uint32_t furnitureId;
+
+    float x;
+    float y;
+
+    std::uint8_t rotation;   // 0~3
 };
 
 struct CS_LOGOUT_PACKET
@@ -229,6 +324,62 @@ struct SC_HOUSE_RESULT_PACKET
     std::uint8_t success;
     std::uint8_t reason;   // 0 성공 / 1 다른 집과 너무 가까움 / 2 월드 밖 / 3 몬스터 자리
 };
+
+// 가구 통지 3종. 같은 집(zoneId)에 있는 사람 전원에게 보낸다(요청자 포함).
+// 성공했을 때 따로 RESULT를 보내지 않고 이것들이 곧 성공 신호다.
+struct SC_FURNITURE_SPAWN_PACKET
+{
+    std::uint16_t size;
+    PACKET_TYPE type;
+
+    std::uint32_t furnitureId;
+    std::uint32_t itemType;
+
+    float x;
+    float y;
+
+    std::uint8_t rotation;
+};
+
+struct SC_FURNITURE_MOVED_PACKET
+{
+    std::uint16_t size;
+    PACKET_TYPE type;
+
+    std::uint32_t furnitureId;
+
+    float x;
+    float y;
+
+    std::uint8_t rotation;
+};
+
+struct SC_FURNITURE_REMOVED_PACKET
+{
+    std::uint16_t size;
+    PACKET_TYPE type;
+
+    std::uint32_t furnitureId;
+};
+
+// 요청이 실패했을 때 요청자에게만. reason은 FURNITURE_FAIL_* 참고.
+struct SC_FURNITURE_RESULT_PACKET
+{
+    std::uint16_t size;
+    PACKET_TYPE type;
+
+    std::uint8_t reason;
+};
+
+// 클라(Protocol.cs)가 같은 바이트 수로 읽고 쓰는지 컴파일 때 못 박는다.
+// 여기서 에러가 나면 Protocol.cs의 Make*/Read*도 같이 어긋난 것이다.
+static_assert(sizeof(CS_FURNITURE_PLACE_PACKET) == PACKET_HEADER_SIZE + 13, "CS_FURNITURE_PLACE 크기 불일치");
+static_assert(sizeof(CS_FURNITURE_REMOVE_PACKET) == PACKET_HEADER_SIZE + 4, "CS_FURNITURE_REMOVE 크기 불일치");
+static_assert(sizeof(CS_FURNITURE_MOVE_PACKET) == PACKET_HEADER_SIZE + 13, "CS_FURNITURE_MOVE 크기 불일치");
+static_assert(sizeof(SC_FURNITURE_SPAWN_PACKET) == PACKET_HEADER_SIZE + 17, "SC_FURNITURE_SPAWN 크기 불일치");
+static_assert(sizeof(SC_FURNITURE_MOVED_PACKET) == PACKET_HEADER_SIZE + 13, "SC_FURNITURE_MOVED 크기 불일치");
+static_assert(sizeof(SC_FURNITURE_REMOVED_PACKET) == PACKET_HEADER_SIZE + 4, "SC_FURNITURE_REMOVED 크기 불일치");
+static_assert(sizeof(SC_FURNITURE_RESULT_PACKET) == PACKET_HEADER_SIZE + 1, "SC_FURNITURE_RESULT 크기 불일치");
 
 struct SC_STAT_UPDATE_PACKET
 {
