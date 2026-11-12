@@ -269,6 +269,20 @@ public class NetworkClient : MonoBehaviour
             new Vector3(zoneStartPosition.x, zoneStartPosition.y, 0.0f), Quaternion.identity);
         localPlayerObject.name = "LocalPlayer_" + myPlayerId;
 
+        // 2026-11-12: 내 머리 위 이름표/체력바는 숨긴다. 내 정보는 화면 왼쪽 위 HUD에 있다.
+        // (프리팹 안의 월드 캔버스와 체력바 오브젝트를 끈다. 다른 플레이어 프리팹은 그대로)
+        foreach (Canvas headCanvas in localPlayerObject.GetComponentsInChildren<Canvas>(true))
+        {
+            headCanvas.gameObject.SetActive(false);
+        }
+        foreach (Transform child in localPlayerObject.GetComponentsInChildren<Transform>(true))
+        {
+            if (child != localPlayerObject.transform && child.name.Contains("HealthBar"))
+            {
+                child.gameObject.SetActive(false);
+            }
+        }
+
         // 공격 / 하우징 입력. 프리팹에 붙여도 되고, 안 붙어 있으면 여기서 붙인다.
         if (localPlayerObject.GetComponent<PlayerAttackInput>() == null)
         {

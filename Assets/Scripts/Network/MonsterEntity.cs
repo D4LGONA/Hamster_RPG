@@ -70,6 +70,30 @@ public class MonsterEntity : MonoBehaviour
     {
         Kind = kind ?? "";
 
+        // 머리 위 이름표: 프리팹 기본 글자("hello") 대신 몬스터 이름. 모르는 종류면 숨긴다.
+        TMPro.TMP_Text label = GetComponentInChildren<TMPro.TMP_Text>(true);
+        if (label != null)
+        {
+            string display = null;
+            switch (Kind)
+            {
+                case "Caterpillar": display = "애벌레"; break;
+                case "Ladybug":     display = "무당벌레"; break;
+                case "CatBoss":     display = "고양이 대장"; break;
+            }
+
+            label.text = display ?? "";
+            label.gameObject.SetActive(display != null);
+
+            if (Kind == "CatBoss")
+            {
+                label.color = new Color32(255, 214, 90, 255);   // 보스는 금색 이름
+                // 보스 그림이 두 배라 이름표가 얼굴에 묻힌다. 이름표가 든 캔버스째 올린다.
+                Transform labelRoot = label.canvas != null ? label.canvas.transform : label.transform;
+                labelRoot.localPosition += new Vector3(0.0f, 1.2f, 0.0f);
+            }
+        }
+
         string sheet = null;
         switch (kind)
         {

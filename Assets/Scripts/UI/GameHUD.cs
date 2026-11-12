@@ -42,6 +42,10 @@ public class GameHUD : MonoBehaviour
     private static readonly Color32 MapMe = new Color32(255, 150, 60, 255);
     private static readonly Color32 MapEdge = new Color32(30, 24, 20, 255);
 
+    // 9-slice 테두리 굵기. 스프라이트가 32 PPU라 그대로면 원본 1픽셀이 약 3배로 커진다.
+    // 1.5625를 곱하면 정확히 2배(1px -> 2px)가 되어 작은 800x800 화면에서도 테두리가 두껍지 않다.
+    public const float PixelScaleMultiplier = 1.5625f;
+
     private static GameHUD instance;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -143,7 +147,7 @@ public class GameHUD : MonoBehaviour
         seedSprite = Resources.Load<Sprite>("UI/icon_seed");
         portraitSprite = Resources.Load<Sprite>("UI/portrait_hamster");
 
-        // 캔버스: 1280x720 기준으로 화면에 맞춰 커지고 작아진다. 채팅 캔버스보다 위.
+        // 캔버스: 게임 창이 800x800(1:1)이라 그 크기를 기준으로 잡는다. 창 크기가 바뀌면 비율대로 커지고 작아진다.
         root = new GameObject("HUDCanvas", typeof(RectTransform));
         root.transform.SetParent(transform, false);
         var canvas = root.AddComponent<Canvas>();
@@ -151,7 +155,7 @@ public class GameHUD : MonoBehaviour
         canvas.sortingOrder = 50;
         var scaler = root.AddComponent<CanvasScaler>();
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-        scaler.referenceResolution = new Vector2(1280, 720);
+        scaler.referenceResolution = new Vector2(800, 800);
         scaler.matchWidthOrHeight = 0.5f;
         root.AddComponent<GraphicRaycaster>();
         RectTransform canvasRect = root.GetComponent<RectTransform>();
@@ -167,36 +171,37 @@ public class GameHUD : MonoBehaviour
     private void BuildProfile(RectTransform canvas)
     {
         // 큰 패널
-        RectTransform panel = Panel(canvas, "Profile", panelSprite, new Vector2(0, 1), new Vector2(14, -14), new Vector2(312, 104));
+        // 800x800 화면 기준: 왼쪽 위 260x86. 오른쪽 위 미니맵(156)과 사이에 넉넉히 빈 곳이 남는다.
+        RectTransform panel = Panel(canvas, "Profile", panelSprite, new Vector2(0, 1), new Vector2(10, -10), new Vector2(260, 86));
 
-        RectTransform frame = Panel(panel, "PortraitFrame", panelDarkSprite, new Vector2(0, 1), new Vector2(12, -12), new Vector2(80, 80));
-        Image portrait = Img(frame, "Portrait", portraitSprite, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(66, 66));
+        RectTransform frame = Panel(panel, "PortraitFrame", panelDarkSprite, new Vector2(0, 1), new Vector2(9, -9), new Vector2(68, 68));
+        Image portrait = Img(frame, "Portrait", portraitSprite, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(56, 56));
         portrait.preserveAspect = true;
 
-        nameText = Text(panel, "Name", "", 20, Brown, new Vector2(0, 1), new Vector2(104, -12), new Vector2(150, 26), TextAlignmentOptions.Left);
+        nameText = Text(panel, "Name", "", 17, Brown, new Vector2(0, 1), new Vector2(86, -9), new Vector2(120, 22), TextAlignmentOptions.Left);
         nameText.fontStyle = FontStyles.Bold;
-        levelText = Text(panel, "Level", "", 16, BrownSoft, new Vector2(0, 1), new Vector2(232, -14), new Vector2(66, 24), TextAlignmentOptions.Right);
+        levelText = Text(panel, "Level", "", 14, BrownSoft, new Vector2(0, 1), new Vector2(194, -11), new Vector2(56, 20), TextAlignmentOptions.Right);
         levelText.fontStyle = FontStyles.Bold;
 
-        Img(panel, "HeartIcon", heartSprite, new Vector2(0, 1), new Vector2(104, -46), new Vector2(18, 18));
-        hpFill = Bar(panel, "HpBar", new Vector2(128, -46), new Vector2(170, 18), HpColor, out hpText, out hpFillImage);
+        Img(panel, "HeartIcon", heartSprite, new Vector2(0, 1), new Vector2(86, -37), new Vector2(16, 16));
+        hpFill = Bar(panel, "HpBar", new Vector2(106, -37), new Vector2(144, 16), HpColor, out hpText, out hpFillImage);
 
-        Img(panel, "StarIcon", starSprite, new Vector2(0, 1), new Vector2(104, -72), new Vector2(18, 18));
-        expFill = Bar(panel, "ExpBar", new Vector2(128, -72), new Vector2(170, 18), ExpColor, out expText, out _);
+        Img(panel, "StarIcon", starSprite, new Vector2(0, 1), new Vector2(86, -59), new Vector2(16, 16));
+        expFill = Bar(panel, "ExpBar", new Vector2(106, -59), new Vector2(144, 16), ExpColor, out expText, out _);
 
         // 골드: 패널 아래 작은 알약 모양
-        RectTransform goldPanel = Panel(canvas, "Gold", panelSprite, new Vector2(0, 1), new Vector2(14, -122), new Vector2(150, 38));
-        Img(goldPanel, "SeedIcon", seedSprite, new Vector2(0, 0.5f), new Vector2(12, 0), new Vector2(16, 20));
-        goldText = Text(goldPanel, "GoldValue", "0", 18, Brown, new Vector2(0, 0.5f), new Vector2(36, 0), new Vector2(104, 28), TextAlignmentOptions.Left);
+        RectTransform goldPanel = Panel(canvas, "Gold", panelSprite, new Vector2(0, 1), new Vector2(10, -100), new Vector2(124, 32));
+        Img(goldPanel, "SeedIcon", seedSprite, new Vector2(0, 0.5f), new Vector2(10, 0), new Vector2(14, 17));
+        goldText = Text(goldPanel, "GoldValue", "0", 15, Brown, new Vector2(0, 0.5f), new Vector2(30, 0), new Vector2(90, 24), TextAlignmentOptions.Left);
         goldText.fontStyle = FontStyles.Bold;
     }
 
     private void BuildMinimap(RectTransform canvas)
     {
-        RectTransform panel = Panel(canvas, "Minimap", panelSprite, new Vector2(1, 1), new Vector2(-14, -14), new Vector2(200, 226));
+        RectTransform panel = Panel(canvas, "Minimap", panelSprite, new Vector2(1, 1), new Vector2(-10, -10), new Vector2(156, 176));
         minimapPanel = panel.gameObject;
 
-        RectTransform frame = Panel(panel, "MapFrame", panelDarkSprite, new Vector2(0.5f, 1), new Vector2(0, -10), new Vector2(184, 184));
+        RectTransform frame = Panel(panel, "MapFrame", panelDarkSprite, new Vector2(0.5f, 1), new Vector2(0, -8), new Vector2(142, 142));
 
         minimapTexture = new Texture2D(MapPixels, MapPixels, TextureFormat.RGBA32, false);
         minimapTexture.filterMode = FilterMode.Point;
@@ -208,21 +213,21 @@ public class GameHUD : MonoBehaviour
         minimapImage = imgGo.AddComponent<RawImage>();
         minimapImage.texture = minimapTexture;
         minimapImage.raycastTarget = false;
-        Place(minimapImage.rectTransform, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(170, 170));
+        Place(minimapImage.rectTransform, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(128, 128));   // 텍스처 128px = 1:1
 
-        minimapLabel = Text(frame, "InHouse", "집 안", 20, new Color(1, 1, 1, 0.9f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(170, 40), TextAlignmentOptions.Center);
+        minimapLabel = Text(frame, "InHouse", "집 안", 18, new Color(1, 1, 1, 0.9f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(128, 40), TextAlignmentOptions.Center);
         minimapLabel.gameObject.SetActive(false);
 
-        coordText = Text(panel, "Coord", "", 14, BrownSoft, new Vector2(0.5f, 0), new Vector2(0, 8), new Vector2(180, 22), TextAlignmentOptions.Center);
+        coordText = Text(panel, "Coord", "", 12, BrownSoft, new Vector2(0.5f, 0), new Vector2(0, 6), new Vector2(140, 18), TextAlignmentOptions.Center);
     }
 
     private void BuildToasts(RectTransform canvas)
     {
         toastRoot = new GameObject("LevelUp", typeof(RectTransform)).GetComponent<RectTransform>();
         toastRoot.SetParent(canvas, false);
-        Place(toastRoot, new Vector2(0.5f, 1), new Vector2(0, -90), new Vector2(500, 80));
+        Place(toastRoot, new Vector2(0.5f, 1), new Vector2(0, -200), new Vector2(440, 70));   // 패널들 아래, 캐릭터 위
 
-        levelUpText = Text(toastRoot, "Text", "", 44, Gold, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(500, 80), TextAlignmentOptions.Center);
+        levelUpText = Text(toastRoot, "Text", "", 38, Gold, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(440, 70), TextAlignmentOptions.Center);
         levelUpText.fontStyle = FontStyles.Bold;
         levelUpText.outlineWidth = 0.25f;
         levelUpText.outlineColor = new Color32(90, 50, 20, 255);
@@ -230,12 +235,12 @@ public class GameHUD : MonoBehaviour
 
         gainRoot = new GameObject("Gains", typeof(RectTransform)).GetComponent<RectTransform>();
         gainRoot.SetParent(canvas, false);
-        Place(gainRoot, new Vector2(0, 1), new Vector2(174, -122), new Vector2(200, 38));   // 골드 알약 오른쪽
+        Place(gainRoot, new Vector2(0, 1), new Vector2(142, -100), new Vector2(200, 32));   // 골드 알약 오른쪽
     }
 
     private void BuildStatusWindow(RectTransform canvas)
     {
-        RectTransform panel = Panel(canvas, "StatusWindow", panelSprite, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(360, 430));
+        RectTransform panel = Panel(canvas, "StatusWindow", panelSprite, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(340, 420));
         statusWindow = panel.gameObject;
         panel.GetComponent<Image>().raycastTarget = true;   // 창 위를 클릭해도 공격이 나가지 않게(PlayerAttackInput이 UI 위 클릭은 무시)
 
@@ -256,7 +261,7 @@ public class GameHUD : MonoBehaviour
         foreach (string label in rows)
         {
             Text(panel, label, label, 17, BrownSoft, new Vector2(0, 1), new Vector2(36, y), new Vector2(130, 26), TextAlignmentOptions.Left);
-            TextMeshProUGUI value = Text(panel, label + "Value", "-", 17, Brown, new Vector2(0, 1), new Vector2(170, y), new Vector2(156, 26), TextAlignmentOptions.Right);
+            TextMeshProUGUI value = Text(panel, label + "Value", "-", 17, Brown, new Vector2(0, 1), new Vector2(160, y), new Vector2(150, 26), TextAlignmentOptions.Right);
             value.fontStyle = FontStyles.Bold;
             statusValues[label] = value;
             y -= 30;
@@ -473,7 +478,7 @@ public class GameHUD : MonoBehaviour
 
     private void AddGain(string message, Color color)
     {
-        TextMeshProUGUI text = Text(gainRoot, "Gain", message, 16, color, new Vector2(0, 0.5f), Vector2.zero, new Vector2(240, 24), TextAlignmentOptions.Left);
+        TextMeshProUGUI text = Text(gainRoot, "Gain", message, 14, color, new Vector2(0, 0.5f), Vector2.zero, new Vector2(220, 22), TextAlignmentOptions.Left);
         text.fontStyle = FontStyles.Bold;
         text.outlineWidth = 0.22f;
         text.outlineColor = new Color32(60, 40, 30, 255);
@@ -516,7 +521,7 @@ public class GameHUD : MonoBehaviour
             }
 
             int stack = gains.Count - 1 - i;
-            gain.text.rectTransform.anchoredPosition = new Vector2(0, -gain.age * 20.0f - stack * 22.0f);
+            gain.text.rectTransform.anchoredPosition = new Vector2(0, -gain.age * 18.0f - stack * 20.0f);
             gain.text.alpha = 1.0f - Mathf.Clamp01((gain.age - 0.7f) / 0.5f);
         }
     }
@@ -569,6 +574,7 @@ public class GameHUD : MonoBehaviour
     {
         Image image = Img(parent, name, sprite, anchor, position, size);
         image.type = Image.Type.Sliced;
+        image.pixelsPerUnitMultiplier = PixelScaleMultiplier;
         image.raycastTarget = false;
         return image.rectTransform;
     }
@@ -613,12 +619,14 @@ public class GameHUD : MonoBehaviour
     {
         Image bg = Img(parent, name, barBgSprite, new Vector2(0, 1), position, size);
         bg.type = Image.Type.Sliced;
+        bg.pixelsPerUnitMultiplier = PixelScaleMultiplier;
 
         var fillGo = new GameObject("Fill", typeof(RectTransform));
         fillGo.transform.SetParent(bg.rectTransform, false);
         fillImage = fillGo.AddComponent<Image>();
         fillImage.sprite = barFillSprite;
         fillImage.type = Image.Type.Sliced;
+        fillImage.pixelsPerUnitMultiplier = PixelScaleMultiplier;
         fillImage.color = color;
         fillImage.raycastTarget = false;
 
@@ -629,7 +637,7 @@ public class GameHUD : MonoBehaviour
         fill.offsetMin = new Vector2(2, 2);
         fill.offsetMax = new Vector2(-2, -2);
 
-        label = Text(bg.rectTransform, "Value", "", 12, Color.white, new Vector2(0.5f, 0.5f), Vector2.zero, size, TextAlignmentOptions.Center);
+        label = Text(bg.rectTransform, "Value", "", 11, Color.white, new Vector2(0.5f, 0.5f), Vector2.zero, size, TextAlignmentOptions.Center);
         label.fontStyle = FontStyles.Bold;
         label.outlineWidth = 0.25f;
         label.outlineColor = new Color32(40, 24, 18, 255);

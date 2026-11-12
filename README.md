@@ -69,7 +69,8 @@ Assets/Scripts/
     RemotePlayer.cs               다른 플레이어 표시 (이름표 · 애니메이션 · 보간)
     HouseEntity.cs                집 표시 (런타임 생성)
     MonsterEntity.cs              몬스터 표시 · 종류별 외형/걷기 · 보간 · 피격/죽음 연출
-  UI/GameHUD.cs                   HUD (초상화·HP/경험치·골드, 미니맵, 레벨업/획득 알림, 상태창 Tab/C) · 로그인하면 자동 생성
+  UI/GameHUD.cs                   HUD (초상화·HP/경험치·골드, 미니맵, 레벨업/획득 알림, 상태창 Tab/C) · 800x800 기준 · 로그인하면 자동 생성
+  UI/TitleScreen.cs               타이틀 화면 (배경 · 로고 · 걸어다니는 몬스터 · 이름 입력) · TitleScene에서 자동 생성
     MonsterHealthBar.cs           몬스터 체력바 (런타임 생성)
     DamageNumber.cs               떠오르는 데미지 숫자 (런타임 생성)
   PlayerAttackInput.cs            마우스 방향 공격 입력
