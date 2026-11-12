@@ -18,6 +18,9 @@ struct PlayerStats
 
     int combatPower = 0;
 
+    // 2026-11-13: 장착 무기 공격력. 서버가 장착/해제할 때 넣고 Recalculate가 attack에 더한다. 저장하지 않는다(무기에서 다시 계산).
+    int bonusAttack = 0;
+
     // 경험치를 넣고 필요하면 레벨을 올린다. 한 번에 여러 레벨이 오를 수도 있어서 while로 돈다.
     // 레벨업했으면 true(클라에 알려줄지 판단용).
     bool AddExp(int amount)
@@ -61,7 +64,7 @@ struct PlayerStats
     void Recalculate()
     {
         maxHp = 100 + (level - 1) * 20;
-        attack = 10 + (level - 1) * 3;
+        attack = 10 + (level - 1) * 3 + bonusAttack;
         defense = 3 + (level - 1);
 
         if (hp > maxHp)

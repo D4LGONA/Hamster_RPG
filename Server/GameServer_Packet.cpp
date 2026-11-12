@@ -76,6 +76,11 @@ int GameServer::ProcessPacket(std::uint32_t playerId, const char* data, int byte
                 ProcessHouseAction(playerId);
             break;
 
+        case PACKET_TYPE::CS_USE_ITEM:
+            if (packetSize == sizeof(CS_USE_ITEM_PACKET))
+                ProcessUseItem(playerId, reinterpret_cast<const CS_USE_ITEM_PACKET*>(packetData));
+            break;
+
         case PACKET_TYPE::CS_LOGOUT:
             if (packetSize == sizeof(CS_LOGOUT_PACKET))
                 DisconnectPlayer(playerId);
@@ -198,6 +203,7 @@ void GameServer::SendLoginFail(std::uint32_t playerId)
 void GameServer::CompleteLogin(std::uint32_t playerId, const std::string& playerName, const CharacterData* saved, bool fromDb)
 {
     PlayerStats selfStats;
+    SC_INVENTORY_PACKET selfInventory{};
     SC_LOGIN_RESULT_PACKET loginResult{};
 
     // (받을 사람, 보낼 spawn). 주변을 서로 보이게 만드는 일은 PopulateWorldView가 한다.
@@ -241,6 +247,13 @@ void GameServer::CompleteLogin(std::uint32_t playerId, const std::string& player
 
         if (saved != nullptr)
         {
+            for (const CharacterData::ItemRow& row : saved->items)
+            {
+                player.GetInventory().SetSlot(row.slot, row.itemId, row.count);
+            }
+            player.GetInventory().SetEquippedSlot(saved->equippedSlot);
+            player.GetStats().bonusAttack = player.GetInventory().GetWeaponAttack();   // LoadSaved의 Recalculate가 반영
+
             player.GetStats().LoadSaved(saved->level, saved->exp, saved->gold, saved->hp);
             player.SetPersistent(true);
         }
@@ -258,6 +271,7 @@ void GameServer::CompleteLogin(std::uint32_t playerId, const std::string& player
 
         Player& self = result.first->second;
         selfStats = self.GetStats();
+        self.GetInventory().FillPacket(selfInventory);
 
         // 섹터 격자에 등록
         sectorGrid.Add(playerId, self.GetX(), self.GetY());
@@ -279,6 +293,7 @@ void GameServer::CompleteLogin(std::uint32_t playerId, const std::string& player
     // ---- playersLock 해제 후 전송(락 순서: players -> sessions 유지) ----
     SendPacket(playerId, &loginResult, loginResult.size);
     SendStatUpdate(playerId, selfStats);
+    SendInventory(playerId, selfInventory);
 
     for (auto& [targetId, spawn] : spawnSends)
     {
@@ -307,6 +322,17 @@ CharacterData GameServer::MakeSaveData(const Player& player)
     data.x = player.GetX();
     data.y = player.GetY();
     data.isNew = false;
+
+    const Inventory& inventory = player.GetInventory();
+    for (int i = 0; i < INVENTORY_SLOTS; ++i)
+    {
+        const InventorySlotData& slot = inventory.GetSlot(i);
+        if (slot.itemId != 0)
+        {
+            data.items.push_back({ i, slot.itemId, slot.count });
+        }
+    }
+    data.equippedSlot = inventory.GetEquippedSlot();
 
     if (player.GetZoneId() != 0)
     {

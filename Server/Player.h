@@ -7,6 +7,7 @@
 #include "stdafx.h"
 #include <unordered_set>
 #include "PlayerStats.h"
+#include "Item.h"
 
 class Player
 {
@@ -58,6 +59,17 @@ public:
     void SetName(const std::string& newName) { name = newName; }
 
     // DB에서 제대로 불러온 캐릭터만 저장한다. 불러오기에 실패했는데 기본값으로 저장하면 진짜 기록을 덮어쓴다.
+    // 2026-11-13: 가방(20칸) + 무기 장착
+    Inventory& GetInventory() { return inventory; }
+    const Inventory& GetInventory() const { return inventory; }
+
+    // 무기 장착이 바뀌면 부른다. 공격력을 다시 계산한다.
+    void RefreshWeaponStats()
+    {
+        stats.bonusAttack = inventory.GetWeaponAttack();
+        stats.Recalculate();
+    }
+
     bool IsPersistent() const { return persistent; }
     void SetPersistent(bool value) { persistent = value; }
 
@@ -71,6 +83,7 @@ private:
     bool loggedIn = false;
 
     PlayerStats stats;
+    Inventory inventory;
     bool persistent = false;
 
     std::unordered_set<std::uint32_t> viewList;

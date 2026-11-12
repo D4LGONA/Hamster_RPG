@@ -12,6 +12,19 @@ public class DamageNumber : MonoBehaviour
     private float elapsed;
     private Color baseColor;
 
+    // 2026-11-13: 내가 맞았을 때는 빨간 숫자
+    public static void SpawnHurt(Vector3 worldPosition, int damage)
+    {
+        Spawn(worldPosition, damage);
+        if (lastSpawned != null)
+        {
+            lastSpawned.text.color = new Color(1.0f, 0.35f, 0.35f);
+            lastSpawned.baseColor = lastSpawned.text.color;
+        }
+    }
+
+    private static DamageNumber lastSpawned;
+
     public static void Spawn(Vector3 worldPosition, int damage)
     {
         GameObject obj = new GameObject("DamageNumber");
@@ -22,6 +35,7 @@ public class DamageNumber : MonoBehaviour
 
         DamageNumber damageNumber = obj.AddComponent<DamageNumber>();
         damageNumber.Setup(damage);
+        lastSpawned = damageNumber;
     }
 
     private void Setup(int damage)

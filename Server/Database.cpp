@@ -223,9 +223,9 @@ bool Database::TryLoad(const std::string& name, CharacterData& out)
             SQLNumResultCols(stmt, &columns);
         }
 
-        if (columns >= 7 && Ok(SQLFetch(stmt)))
+        if (columns >= 8 && Ok(SQLFetch(stmt)))
         {
-            SQLINTEGER level = 1, exp = 0, gold = 0, hp = 100, isNew = 0;
+            SQLINTEGER level = 1, exp = 0, gold = 0, hp = 100, isNew = 0, weaponSlot = -1;
             SQLREAL x = 0.0f, y = 0.0f;
             SQLLEN ind = 0;
 
@@ -236,6 +236,7 @@ bool Database::TryLoad(const std::string& name, CharacterData& out)
             SQLGetData(stmt, 5, SQL_C_FLOAT, &x, 0, &ind);
             SQLGetData(stmt, 6, SQL_C_FLOAT, &y, 0, &ind);
             SQLGetData(stmt, 7, SQL_C_SLONG, &isNew, 0, &ind);
+            SQLGetData(stmt, 8, SQL_C_SLONG, &weaponSlot, 0, &ind);
 
             out.name = name;
             out.level = level;
@@ -245,7 +246,30 @@ bool Database::TryLoad(const std::string& name, CharacterData& out)
             out.x = x;
             out.y = y;
             out.isNew = isNew != 0;
+            out.equippedSlot = weaponSlot;
+            out.items.clear();
             success = true;
+
+            // 두 번째 결과 집합: 인벤토리 (slot, item_id, count). SQLMoreResults가 남은 줄을 버리고 다음 집합으로 넘어간다
+            // (SQLCloseCursor를 부르면 남은 결과 집합까지 다 버려지니 쓰지 않는다)
+            if (Ok(SQLMoreResults(stmt)))
+            {
+                SQLNumResultCols(stmt, &columns);
+
+                while (columns == 0 && Ok(SQLMoreResults(stmt)))
+                {
+                    SQLNumResultCols(stmt, &columns);
+                }
+
+                while (columns >= 3 && Ok(SQLFetch(stmt)))
+                {
+                    SQLINTEGER slot = 0, itemId = 0, count = 0;
+                    SQLGetData(stmt, 1, SQL_C_SLONG, &slot, 0, &ind);
+                    SQLGetData(stmt, 2, SQL_C_SLONG, &itemId, 0, &ind);
+                    SQLGetData(stmt, 3, SQL_C_SLONG, &count, 0, &ind);
+                    out.items.push_back({ slot, static_cast<std::uint16_t>(itemId), static_cast<std::uint16_t>(count) });
+                }
+            }
         }
     }
 
@@ -273,19 +297,36 @@ bool Database::TrySave(const std::vector<CharacterData>& list)
     // 한 번 준비한 문장에 값만 바꿔 끼워 반복 실행한다. 바인딩은 아래 변수들의 주소를 가리킨다.
     std::u16string wideName;
     SQLLEN nameBytes = 0;
-    SQLINTEGER level = 0, exp = 0, gold = 0, hp = 0;
+    SQLINTEGER level = 0, exp = 0, gold = 0, hp = 0, weaponSlot = -1;
     SQLREAL x = 0.0f, y = 0.0f;
     char16_t nameBuffer[32] = {};
 
+    // 인벤토리 한 칸 저장용 두 번째 문장. 이름 버퍼는 위와 같은 것을 같이 가리킨다.
+    SQLHSTMT itemStmt = SQL_NULL_HSTMT;
+    SQLINTEGER itemSlot = 0, itemId = 0, itemCount = 0;
+
+    if (Ok(SQLAllocHandle(SQL_HANDLE_STMT, conn, &itemStmt)) == false)
+    {
+        RecordError(SQL_HANDLE_DBC, conn, "save alloc item");
+        SQLFreeHandle(SQL_HANDLE_STMT, stmt);
+        return false;
+    }
+
     bool success =
-        Ok(ODBC_PREPARE(stmt, reinterpret_cast<SQLCHAR*>(const_cast<char*>("{CALL sp_character_save(?, ?, ?, ?, ?, ?, ?)}")), SQL_NTS)) &&
+        Ok(ODBC_PREPARE(stmt, reinterpret_cast<SQLCHAR*>(const_cast<char*>("{CALL sp_character_save(?, ?, ?, ?, ?, ?, ?, ?)}")), SQL_NTS)) &&
         Ok(SQLBindParameter(stmt, 1, SQL_PARAM_INPUT, SQL_C_WCHAR, SQL_WVARCHAR, 20, 0, nameBuffer, sizeof(nameBuffer), &nameBytes)) &&
         Ok(SQLBindParameter(stmt, 2, SQL_PARAM_INPUT, SQL_C_SLONG, SQL_INTEGER, 0, 0, &level, 0, nullptr)) &&
         Ok(SQLBindParameter(stmt, 3, SQL_PARAM_INPUT, SQL_C_SLONG, SQL_INTEGER, 0, 0, &exp, 0, nullptr)) &&
         Ok(SQLBindParameter(stmt, 4, SQL_PARAM_INPUT, SQL_C_SLONG, SQL_INTEGER, 0, 0, &gold, 0, nullptr)) &&
         Ok(SQLBindParameter(stmt, 5, SQL_PARAM_INPUT, SQL_C_SLONG, SQL_INTEGER, 0, 0, &hp, 0, nullptr)) &&
         Ok(SQLBindParameter(stmt, 6, SQL_PARAM_INPUT, SQL_C_FLOAT, SQL_REAL, 0, 0, &x, 0, nullptr)) &&
-        Ok(SQLBindParameter(stmt, 7, SQL_PARAM_INPUT, SQL_C_FLOAT, SQL_REAL, 0, 0, &y, 0, nullptr));
+        Ok(SQLBindParameter(stmt, 7, SQL_PARAM_INPUT, SQL_C_FLOAT, SQL_REAL, 0, 0, &y, 0, nullptr)) &&
+        Ok(SQLBindParameter(stmt, 8, SQL_PARAM_INPUT, SQL_C_SLONG, SQL_INTEGER, 0, 0, &weaponSlot, 0, nullptr)) &&
+        Ok(ODBC_PREPARE(itemStmt, reinterpret_cast<SQLCHAR*>(const_cast<char*>("{CALL sp_inventory_set(?, ?, ?, ?)}")), SQL_NTS)) &&
+        Ok(SQLBindParameter(itemStmt, 1, SQL_PARAM_INPUT, SQL_C_WCHAR, SQL_WVARCHAR, 20, 0, nameBuffer, sizeof(nameBuffer), &nameBytes)) &&
+        Ok(SQLBindParameter(itemStmt, 2, SQL_PARAM_INPUT, SQL_C_SLONG, SQL_INTEGER, 0, 0, &itemSlot, 0, nullptr)) &&
+        Ok(SQLBindParameter(itemStmt, 3, SQL_PARAM_INPUT, SQL_C_SLONG, SQL_INTEGER, 0, 0, &itemId, 0, nullptr)) &&
+        Ok(SQLBindParameter(itemStmt, 4, SQL_PARAM_INPUT, SQL_C_SLONG, SQL_INTEGER, 0, 0, &itemCount, 0, nullptr));
 
     if (success)
     {
@@ -300,7 +341,7 @@ bool Database::TrySave(const std::vector<CharacterData>& list)
             nameBuffer[count] = 0;
             nameBytes = static_cast<SQLLEN>(count * sizeof(char16_t));
 
-            level = c.level; exp = c.exp; gold = c.gold; hp = c.hp; x = c.x; y = c.y;
+            level = c.level; exp = c.exp; gold = c.gold; hp = c.hp; x = c.x; y = c.y; weaponSlot = c.equippedSlot;
 
             if (Ok(SQLExecute(stmt)) == false)
             {
@@ -309,9 +350,29 @@ bool Database::TrySave(const std::vector<CharacterData>& list)
             }
 
             DrainResults(stmt);
+
+            // 가방: sp_character_save가 비웠으니 남은 칸만 다시 넣는다
+            for (const CharacterData::ItemRow& row : c.items)
+            {
+                itemSlot = row.slot; itemId = row.itemId; itemCount = row.count;
+
+                if (Ok(SQLExecute(itemStmt)) == false)
+                {
+                    RecordError(SQL_HANDLE_STMT, itemStmt, "save item");
+                    success = false;
+                    break;
+                }
+
+                DrainResults(itemStmt);
+            }
+
+            if (success == false)
+            {
+                break;
+            }
         }
 
-        if (success == false)
+        if (success == false && lastError.rfind("save item", 0) != 0)
         {
             RecordError(SQL_HANDLE_STMT, stmt, "save");
         }
@@ -324,6 +385,7 @@ bool Database::TrySave(const std::vector<CharacterData>& list)
         RecordError(SQL_HANDLE_STMT, stmt, "save prepare");
     }
 
+    SQLFreeHandle(SQL_HANDLE_STMT, itemStmt);
     SQLFreeHandle(SQL_HANDLE_STMT, stmt);
     return success;
 }

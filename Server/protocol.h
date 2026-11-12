@@ -64,6 +64,14 @@ enum class PACKET_TYPE : std::uint16_t
     CS_HOUSE_ACTION,   // 14  T키. 설치/입장/퇴장은 서버가 상황 보고 정한다
     SC_ZONE_CHANGE,    // 15  존이 바뀌었다(월드 <-> 집 안). 클라는 씬을 바꾼다
     SC_HOUSE_RESULT,   // 16  설치 시도 결과
+
+    // 2026-11-13: 아이템 / 인벤토리 / 몬스터 반격. 맨 뒤에만 붙일 것.
+    CS_USE_ITEM,       // 17  인벤토리 칸 사용(먹기 / 무기 장착·해제)
+    SC_INVENTORY,      // 18  인벤토리 전체(20칸 + 장착 칸). 바뀔 때마다 통째로 보낸다(85바이트)
+    SC_ITEM_DROP,      // 19  바닥에 아이템이 떨어졌다(잡은 사람에게만. 개인 드랍)
+    SC_ITEM_REMOVE,    // 20  바닥 아이템이 사라졌다(주웠거나 시간이 다 됐다)
+    SC_ITEM_PICKUP,    // 21  주웠다(알림 표시용)
+    SC_PLAYER_FAINT,   // 22  HP가 0이 되어 광장으로 돌아왔다
 };
 
 // 모든 패킷 맨 앞에 붙는 헤더(size + type)의 크기. 4바이트.
@@ -250,6 +258,71 @@ struct SC_STAT_UPDATE_PACKET
     float moveSpeed;
 
     int combatPower;
+};
+
+// ==============================
+// 2026-11-13: 아이템
+// ==============================
+constexpr int INVENTORY_SLOTS = 20;
+
+struct InventorySlotData
+{
+    std::uint16_t itemId;   // 0이면 빈 칸
+    std::uint16_t count;
+};
+
+struct CS_USE_ITEM_PACKET
+{
+    std::uint16_t size;
+    PACKET_TYPE type;
+
+    std::uint8_t slot;
+};
+
+struct SC_INVENTORY_PACKET
+{
+    std::uint16_t size;
+    PACKET_TYPE type;
+
+    std::int8_t equippedWeaponSlot;   // -1이면 맨손
+    InventorySlotData slots[INVENTORY_SLOTS];
+};
+
+struct SC_ITEM_DROP_PACKET
+{
+    std::uint16_t size;
+    PACKET_TYPE type;
+
+    std::uint32_t dropId;
+    std::uint16_t itemId;
+    std::uint16_t count;
+    float x;
+    float y;
+};
+
+struct SC_ITEM_REMOVE_PACKET
+{
+    std::uint16_t size;
+    PACKET_TYPE type;
+
+    std::uint32_t dropId;
+};
+
+struct SC_ITEM_PICKUP_PACKET
+{
+    std::uint16_t size;
+    PACKET_TYPE type;
+
+    std::uint16_t itemId;
+    std::uint16_t count;
+};
+
+struct SC_PLAYER_FAINT_PACKET
+{
+    std::uint16_t size;
+    PACKET_TYPE type;
+
+    int goldLost;
 };
 
 #pragma pack(pop)

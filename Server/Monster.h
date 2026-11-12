@@ -66,6 +66,8 @@ public:
         wanderTimer = 0.0f;
         patrolIndex = 0;
         targetId = 0;
+        aggroTimer = 0.0f;
+        attackCooldown = 0.0f;
     }
 
     // 나를 보고 있는 playerId 집합. 이동/피격/죽음을 이들에게만 전송한다.
@@ -85,6 +87,12 @@ public:
     void SetPatrolIndex(std::size_t value) { patrolIndex = value; }
 
     // --- Chase 상태값. 추격 중인 playerId. 0이면 없음. ---
+    // 2026-11-13: 반격. 맞으면 aggroTimer 동안 때린 사람을 쫓아와 문다(배회/순찰 몬스터도).
+    float GetAggroTimer() const { return aggroTimer; }
+    void SetAggroTimer(float value) { aggroTimer = value; }
+    float GetAttackCooldown() const { return attackCooldown; }
+    void SetAttackCooldown(float value) { attackCooldown = value; }
+
     std::uint32_t GetTargetId() const { return targetId; }
     void SetTargetId(std::uint32_t value) { targetId = value; }
 
@@ -115,4 +123,6 @@ private:
     std::size_t patrolIndex = 0;
 
     std::uint32_t targetId = 0;
+    float aggroTimer = 0.0f;
+    float attackCooldown = 0.0f;
 };

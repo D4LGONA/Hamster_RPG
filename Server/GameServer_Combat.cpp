@@ -12,6 +12,8 @@ void GameServer::ProcessAttack(std::uint32_t playerId, const CS_ATTACK_PACKET* p
     std::vector<std::pair<std::uint32_t, SC_DAMAGE_PACKET>> damageSends;
     std::vector<std::pair<std::uint32_t, std::uint32_t>> deathSends;   // (받을 사람, 죽은 몬스터 id)
 
+    std::vector<SC_ITEM_DROP_PACKET> dropSends;   // 때린 사람에게만(개인 드랍)
+
     int killCount = 0;
     bool leveledUp = false;
     PlayerStats attackerStats;
@@ -91,7 +93,13 @@ void GameServer::ProcessAttack(std::uint32_t playerId, const CS_ATTACK_PACKET* p
                 damageSends.emplace_back(watcherId, damagePacket);
             }
 
-            if (monster.IsAlive() == false)
+            if (monster.IsAlive())
+            {
+                // 2026-11-13: 반격. 맞은 몬스터는 잠깐 때린 사람을 쫓아온다(UpdateMonsters / UpdateMonsterAttacks).
+                monster.SetTargetId(playerId);
+                monster.SetAggroTimer(MONSTER_AGGRO_SEC);
+            }
+            else
             {
                 std::vector<std::uint32_t> deathTargets;
                 KillMonster(monster, deathTargets);   // watchers를 비우므로 위 수집 뒤에 호출해야 한다
@@ -103,13 +111,8 @@ void GameServer::ProcessAttack(std::uint32_t playerId, const CS_ATTACK_PACKET* p
 
                 ++killCount;
 
-                PlayerStats& stats = attacker.GetStats();
-                stats.gold += MONSTER_GOLD_REWARD;
-
-                if (stats.AddExp(MONSTER_EXP_REWARD))
-                {
-                    leveledUp = true;   // 한 번 휘둘러 여러 마리를 잡으면 레벨이 두 번 오를 수도 있다
-                }
+                // 경험치/골드/드랍. 한 번 휘둘러 여러 마리를 잡으면 레벨이 두 번 오를 수도 있다
+                GrantKillRewards(attacker, monster, leveledUp, dropSends);
             }
         }
 
@@ -133,6 +136,11 @@ void GameServer::ProcessAttack(std::uint32_t playerId, const CS_ATTACK_PACKET* p
         death.id = monsterId;
 
         SendPacket(targetPlayerId, &death, death.size);
+    }
+
+    for (SC_ITEM_DROP_PACKET& drop : dropSends)
+    {
+        SendPacket(playerId, &drop, drop.size);
     }
 
     if (killCount > 0)

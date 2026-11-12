@@ -283,7 +283,24 @@ void GameServer::UpdateMonsters(float deltaSeconds, std::vector<std::uint32_t>& 
         float newY = 0.0f;
         bool moved = false;
 
-        switch (monster.GetBehavior())
+        // 2026-11-13: 맞아서 화가 난 동안은 원래 행동 대신 때린 사람을 쫓는다(추격 로직 재사용).
+        // 시간이 끝나면 타겟을 놓고 원래 행동(배회/순찰)으로 돌아간다. 추격형은 원래 쫓는 놈이라 그대로.
+        float aggro = monster.GetAggroTimer();
+
+        if (aggro > 0.0f)
+        {
+            aggro -= deltaSeconds;
+            monster.SetAggroTimer(aggro > 0.0f ? aggro : 0.0f);
+
+            if (aggro <= 0.0f && monster.GetBehavior() != MonsterBehavior::Chase)
+            {
+                monster.SetTargetId(0);
+            }
+        }
+
+        const bool angry = monster.GetAggroTimer() > 0.0f;
+
+        switch (angry ? MonsterBehavior::Chase : monster.GetBehavior())
         {
         case MonsterBehavior::Wander: moved = StepWander(monster, deltaSeconds, newX, newY); break;
         case MonsterBehavior::Patrol: moved = StepPatrol(monster, deltaSeconds, newX, newY); break;

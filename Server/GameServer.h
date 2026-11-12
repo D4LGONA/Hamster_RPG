@@ -56,6 +56,25 @@ private:
     void SendLoginFail(std::uint32_t playerId);
     CharacterData MakeSaveData(const Player& player);   // playersLock을 잡은 상태에서
     void SaveAllPlayers(const char* reason);
+
+    // 2026-11-13: 아이템 / 반격
+    void ProcessUseItem(std::uint32_t playerId, const CS_USE_ITEM_PACKET* packet);
+    void SendInventory(std::uint32_t playerId, const SC_INVENTORY_PACKET& packet);
+    // 처치 보상 + 드랍. ProcessAttack이 playersLock 안에서 부른다. 보낼 드랍 패킷은 dropSends에 모은다.
+    void GrantKillRewards(Player& killer, const Monster& monster, bool& leveledUp,
+                          std::vector<SC_ITEM_DROP_PACKET>& dropSends);
+    // 틱: 바닥 아이템 줍기/사라짐, 몬스터가 붙어 있는 플레이어 물기(HP 0이면 광장으로)
+    struct TickItemSends
+    {
+        std::vector<std::pair<std::uint32_t, SC_ITEM_REMOVE_PACKET>> removes;
+        std::vector<std::pair<std::uint32_t, SC_ITEM_PICKUP_PACKET>> pickups;
+        std::vector<std::pair<std::uint32_t, SC_INVENTORY_PACKET>> inventories;
+        std::vector<std::pair<std::uint32_t, SC_DAMAGE_PACKET>> damages;
+        std::vector<std::pair<std::uint32_t, PlayerStats>> stats;
+        std::vector<std::pair<std::uint32_t, SC_PLAYER_FAINT_PACKET>> faints;
+    };
+    void UpdateGroundDrops(float deltaSeconds, TickItemSends& sends);
+    void UpdateMonsterAttacks(float deltaSeconds, std::vector<std::uint32_t>& playerMovers, TickItemSends& sends);
 public:
     // 종료 직전 저장. 남은 DB 작업을 다 끝낼 때까지 기다린다(main.cpp 콘솔 종료 핸들러).
     void ShutdownSave();
@@ -254,8 +273,7 @@ private:
 
     static constexpr float ATTACK_COOLDOWN_SEC = 0.8f;   // 공격 간격. 서버가 재서 연타를 막는다.
     static constexpr float MONSTER_RESPAWN_SEC = 10.0f;  // 죽은 뒤 부활까지
-    static constexpr int MONSTER_EXP_REWARD = 20;        // 처치 보상(requiredExp 100 -> 5마리에 레벨업)
-    static constexpr int MONSTER_GOLD_REWARD = 10;
+    // 처치 보상은 몬스터 종류별(GameServer_Item.cpp GrantKillRewards)
 
     // 배회용 난수. 게임 틱 스레드에서만 쓴다.
     std::mt19937 wanderRng{ std::random_device{}() };
@@ -291,6 +309,27 @@ private:
     // playersLock으로 보호.
     std::unordered_set<std::uint32_t> pendingLogins;
     float autosaveTimer = 0.0f;
+
+    // 바닥 아이템(개인 드랍). 잡은 사람에게만 보이고 그 사람만 줍는다. playersLock으로 보호.
+    struct GroundDrop
+    {
+        std::uint32_t ownerId;
+        std::uint16_t itemId;
+        std::uint16_t count;
+        float x;
+        float y;
+        float ttl;   // 남은 시간
+    };
+    std::unordered_map<std::uint32_t, GroundDrop> groundDrops;
+    std::uint32_t nextDropId = 1;
+    std::mt19937 dropRng{ std::random_device{}() };
+
+    static constexpr float DROP_TTL_SEC = 60.0f;          // 안 주우면 1분 뒤 사라진다
+    static constexpr float DROP_PICKUP_RADIUS = 1.0f;     // 이만큼 다가가면 자동으로 줍는다
+    static constexpr float MONSTER_AGGRO_SEC = 8.0f;      // 맞은 몬스터가 쫓아오는 시간
+    static constexpr float MONSTER_ATTACK_RANGE = 1.3f;   // 추격은 1.0에서 멈추므로 붙으면 닿는다
+    static constexpr float MONSTER_ATTACK_COOLDOWN = 1.2f;
+    static constexpr float FAINT_GOLD_LOSS = 0.1f;        // 쓰러지면 골드 10%를 잃는다
     static constexpr float AUTOSAVE_INTERVAL_SEC = 30.0f;   // 서버가 갑자기 꺼져도 최대 30초만 잃는다
 
     // 켜진 청크. key = (chunkY << 32) | chunkX. playersLock으로 보호.

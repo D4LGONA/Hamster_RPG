@@ -134,6 +134,98 @@ public class NetworkClient : MonoBehaviour
     // 매 프레임 문자열을 새로 만들지 않아도 된다.
     public int GetStatVersion() { return statVersion; }
 
+    // ---------------- 2026-11-13: 인벤토리 / 바닥 아이템 ----------------
+    public struct InventorySlot { public ushort itemId; public ushort count; }
+
+    private readonly InventorySlot[] inventory = new InventorySlot[Protocol.InventorySlots];
+    private int equippedWeaponSlot = -1;
+    private int inventoryVersion;
+    private readonly Dictionary<uint, GroundItem> groundItems = new Dictionary<uint, GroundItem>();
+
+    public InventorySlot GetInventorySlot(int index) { return inventory[index]; }
+    public int GetEquippedWeaponSlot() { return equippedWeaponSlot; }
+    public int GetInventoryVersion() { return inventoryVersion; }
+
+    // HUD가 알림을 띄우려고 구독한다
+    public event System.Action<ushort, ushort> OnItemPickedUp;   // (itemId, count)
+    public event System.Action<int> OnFainted;                   // 잃은 골드
+    public event System.Action OnLocalPlayerHurt;
+
+    private void HandleInventory(byte[] packet)
+    {
+        int offset = Protocol.HeaderSize;
+        int equipped = (sbyte)Protocol.ReadByte(packet, ref offset);
+        var slots = new InventorySlot[Protocol.InventorySlots];
+
+        for (int i = 0; i < slots.Length; ++i)
+        {
+            slots[i].itemId = Protocol.ReadUShort(packet, ref offset);
+            slots[i].count = Protocol.ReadUShort(packet, ref offset);
+        }
+
+        mainThreadActions.Enqueue(() =>
+        {
+            System.Array.Copy(slots, inventory, slots.Length);
+            equippedWeaponSlot = equipped;
+            inventoryVersion++;
+        });
+    }
+
+    private void HandleItemDrop(byte[] packet)
+    {
+        int offset = Protocol.HeaderSize;
+        uint dropId = Protocol.ReadUInt(packet, ref offset);
+        ushort itemId = Protocol.ReadUShort(packet, ref offset);
+        ushort count = Protocol.ReadUShort(packet, ref offset);
+        float x = Protocol.ReadFloat(packet, ref offset);
+        float y = Protocol.ReadFloat(packet, ref offset);
+
+        mainThreadActions.Enqueue(() =>
+        {
+            if (groundItems.ContainsKey(dropId))
+            {
+                return;
+            }
+
+            groundItems.Add(dropId, GroundItem.Create(itemId, count, new Vector2(x, y)));
+        });
+    }
+
+    private void HandleItemRemove(byte[] packet)
+    {
+        int offset = Protocol.HeaderSize;
+        uint dropId = Protocol.ReadUInt(packet, ref offset);
+
+        mainThreadActions.Enqueue(() =>
+        {
+            if (groundItems.TryGetValue(dropId, out GroundItem item))
+            {
+                if (item != null)
+                {
+                    item.Collect(localPlayerObject != null ? localPlayerObject.transform : null);
+                }
+                groundItems.Remove(dropId);
+            }
+        });
+    }
+
+    private void HandleItemPickup(byte[] packet)
+    {
+        int offset = Protocol.HeaderSize;
+        ushort itemId = Protocol.ReadUShort(packet, ref offset);
+        ushort count = Protocol.ReadUShort(packet, ref offset);
+
+        mainThreadActions.Enqueue(() => OnItemPickedUp?.Invoke(itemId, count));
+    }
+
+    private void HandlePlayerFaint(byte[] packet)
+    {
+        int offset = Protocol.HeaderSize;
+        int goldLost = Protocol.ReadInt(packet, ref offset);
+
+        mainThreadActions.Enqueue(() => OnFainted?.Invoke(goldLost));
+    }
+
     // 2026-11-12: HUD/미니맵용. 읽기만 한다(추가/삭제는 패킷 처리 쪽에서만).
     public GameObject GetLocalPlayerObject() { return localPlayerObject; }
     public uint GetCurrentZoneId() { return currentZoneId; }
@@ -206,6 +298,17 @@ public class NetworkClient : MonoBehaviour
 
         Log("[NETWORK] SendAttack dx = " + direction.x + ", dy = " + direction.y);
         SendRaw(Protocol.MakeAttackPacket(direction.x, direction.y));
+    }
+
+    // 2026-11-13: 인벤토리 칸 클릭. 먹을지/장착할지는 서버가 아이템을 보고 정한다.
+    public void SendUseItem(int slot)
+    {
+        if (isConnected == false || isLoggedIn == false || stream == null || slot < 0 || slot >= Protocol.InventorySlots)
+        {
+            return;
+        }
+
+        SendRaw(Protocol.MakeUseItemPacket(slot));
     }
 
     // T키. 설치/입장/퇴장 중 무엇이 될지는 서버가 정한다.
@@ -448,6 +551,21 @@ public class NetworkClient : MonoBehaviour
             case Protocol.PacketType.SC_HOUSE_RESULT:
                 HandleHouseResult(packet);
                 break;
+            case Protocol.PacketType.SC_INVENTORY:
+                HandleInventory(packet);
+                break;
+            case Protocol.PacketType.SC_ITEM_DROP:
+                HandleItemDrop(packet);
+                break;
+            case Protocol.PacketType.SC_ITEM_REMOVE:
+                HandleItemRemove(packet);
+                break;
+            case Protocol.PacketType.SC_ITEM_PICKUP:
+                HandleItemPickup(packet);
+                break;
+            case Protocol.PacketType.SC_PLAYER_FAINT:
+                HandlePlayerFaint(packet);
+                break;
             default:
                 mainThreadActions.Enqueue(() => Debug.LogWarning("[NETWORK] Unknown packet type: " + packetType));
                 break;
@@ -629,8 +747,14 @@ public class NetworkClient : MonoBehaviour
                 return;
             }
 
-            // 아직 몬스터만 맞는다(서버가 플레이어를 때리지 않음). 플레이어가 대상인 패킷이
-            // 오기 시작하면 여기서 받으면 된다.
+            // 2026-11-13: 몬스터가 나를 물었다. 내 HP는 곧 이어서 오는 SC_STAT_UPDATE가 HUD에 반영한다.
+            if (targetId == myPlayerId && localPlayerObject != null)
+            {
+                DamageNumber.SpawnHurt(localPlayerObject.transform.position, damage);
+                OnLocalPlayerHurt?.Invoke();
+                return;
+            }
+
             Log("[NETWORK] Damage target not found. id = " + targetId);
         });
     }
@@ -779,9 +903,15 @@ public class NetworkClient : MonoBehaviour
             if (pair.Value != null) Destroy(pair.Value.gameObject);
         }
 
+        foreach (KeyValuePair<uint, GroundItem> pair in groundItems)
+        {
+            if (pair.Value != null) Destroy(pair.Value.gameObject);
+        }
+
         remotePlayers.Clear();
         monsters.Clear();
         houses.Clear();
+        groundItems.Clear();   // 집에 들어가면 바닥 아이템 그림은 사라지지만 서버엔 남아 있어 1분 안에 돌아와 걸으면 주워진다
         pendingSpawns.Clear();
         pendingMoves.Clear();
     }

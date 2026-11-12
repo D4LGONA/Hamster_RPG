@@ -138,6 +138,7 @@
   <ItemGroup>
     <ClInclude Include="WorldGen.h" />
     <ClInclude Include="Database.h" />
+    <ClInclude Include="Item.h" />
     <ClInclude Include="GameServer.h" />
     <ClInclude Include="Monster.h" />
     <ClInclude Include="NetworkTypes.h" />
@@ -154,6 +155,7 @@
     <ClCompile Include="GameServer_Packet.cpp" />
     <ClCompile Include="GameServer_View.cpp" />
     <ClCompile Include="GameServer_Chunk.cpp" />
+    <ClCompile Include="GameServer_Item.cpp" />
     <ClCompile Include="GameServer_Monster.cpp" />
     <ClCompile Include="GameServer_Combat.cpp" />
     <ClCompile Include="GameServer_House.cpp" />

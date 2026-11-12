@@ -5,6 +5,8 @@
 //   가운데 위 : 레벨업 알림
 //   왼쪽      : 경험치/골드 획득 알림 (떠오르며 사라짐)
 //   가운데    : 상태창 (Tab 또는 C)
+//   2026-11-13: 가방 (I) — 칸을 누르면 먹기/무기 장착. Q는 회복 아이템 바로 먹기.
+//               주운 아이템 알림, 쓰러짐 알림, 맞으면 화면 가장자리가 빨갛게 번쩍.
 //
 // 값은 전부 서버가 보내준 것(NetworkClient)이다. HUD가 계산하는 게임 값은 없다.
 // 미니맵의 장애물은 WorldGen 공식으로 그린다(서버와 같은 공식이라 실제로 막히는 자리와 같다).
@@ -12,6 +14,7 @@
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
@@ -90,6 +93,18 @@ public class GameHUD : MonoBehaviour
     private readonly Dictionary<string, TextMeshProUGUI> statusValues = new Dictionary<string, TextMeshProUGUI>();
     private TextMeshProUGUI statusTitle;
 
+    // 가방
+    private GameObject inventoryWindow;
+    private readonly Image[] slotIcons = new Image[Protocol.InventorySlots];
+    private readonly TextMeshProUGUI[] slotCounts = new TextMeshProUGUI[Protocol.InventorySlots];
+    private readonly GameObject[] slotEquipped = new GameObject[Protocol.InventorySlots];
+    private TextMeshProUGUI itemInfoText;
+    private int lastInventoryVersion = -1;
+
+    // 맞았을 때 번쩍
+    private Image hurtOverlay;
+    private float hurtTimer;
+
     private int lastStatVersion = -1;
     private bool hasPrev;
     private int prevLevel, prevExp, prevGold;
@@ -125,6 +140,7 @@ public class GameHUD : MonoBehaviour
 
         UpdateStats(net);
         UpdateStatusWindowToggle();
+        UpdateInventory(net);
         UpdateMinimap(net);
         UpdateToasts();
     }
@@ -160,10 +176,31 @@ public class GameHUD : MonoBehaviour
         root.AddComponent<GraphicRaycaster>();
         RectTransform canvasRect = root.GetComponent<RectTransform>();
 
+        BuildHurtOverlay(canvasRect);   // 맨 먼저 = 맨 뒤에 그려진다(패널을 가리지 않게)
         BuildProfile(canvasRect);
         BuildMinimap(canvasRect);
         BuildToasts(canvasRect);
         BuildStatusWindow(canvasRect);
+        BuildInventoryWindow(canvasRect);
+
+        NetworkClient net = NetworkClient.Instance;
+        if (net != null)
+        {
+            net.OnItemPickedUp += (itemId, count) =>
+            {
+                ItemTable.Def def = ItemTable.Find(itemId);
+                AddGain("+" + count + " " + (def != null ? def.Name : "아이템"), new Color32(200, 240, 255, 255));
+            };
+            net.OnFainted += goldLost =>
+            {
+                ShowToast("기절했어요... 광장으로!", new Color32(255, 140, 140, 255));
+                if (goldLost > 0)
+                {
+                    AddGain("-" + goldLost + " 해바라기씨", new Color32(255, 140, 140, 255));
+                }
+            };
+            net.OnLocalPlayerHurt += () => hurtTimer = 0.35f;
+        }
 
         HideEmptySceneStatWindow();
     }
@@ -471,7 +508,13 @@ public class GameHUD : MonoBehaviour
 
     private void ShowLevelUp(int level)
     {
-        levelUpText.text = "LEVEL UP!  Lv." + level;
+        ShowToast("LEVEL UP!  Lv." + level, Gold);
+    }
+
+    private void ShowToast(string message, Color color)
+    {
+        levelUpText.text = message;
+        levelUpText.color = color;
         levelUpTimer = 2.0f;
         toastRoot.gameObject.SetActive(true);
     }
@@ -487,6 +530,12 @@ public class GameHUD : MonoBehaviour
 
     private void UpdateToasts()
     {
+        if (hurtOverlay != null)
+        {
+            hurtTimer -= Time.deltaTime;
+            hurtOverlay.color = new Color(0.9f, 0.1f, 0.1f, Mathf.Clamp01(hurtTimer / 0.35f) * 0.35f);
+        }
+
         if (levelUpTimer > 0.0f)
         {
             levelUpTimer -= Time.deltaTime;
@@ -524,6 +573,160 @@ public class GameHUD : MonoBehaviour
             gain.text.rectTransform.anchoredPosition = new Vector2(0, -gain.age * 18.0f - stack * 20.0f);
             gain.text.alpha = 1.0f - Mathf.Clamp01((gain.age - 0.7f) / 0.5f);
         }
+    }
+
+    // =====================================================================
+    // 2026-11-13: 가방
+    // =====================================================================
+
+    private void BuildHurtOverlay(RectTransform canvas)
+    {
+        // 가장자리만 빨간 액자처럼: 화면 크기 패널 이미지(가운데가 비어 보이게 진한 테두리 스프라이트)를 빨갛게 칠한다
+        hurtOverlay = Img(canvas, "Hurt", panelDarkSprite, new Vector2(0.5f, 0.5f), Vector2.zero, Vector2.zero);
+        hurtOverlay.type = Image.Type.Sliced;
+        hurtOverlay.fillCenter = false;
+        hurtOverlay.pixelsPerUnitMultiplier = 0.2f;   // 테두리를 아주 두껍게
+        RectTransform r = hurtOverlay.rectTransform;
+        r.anchorMin = Vector2.zero;
+        r.anchorMax = Vector2.one;
+        r.offsetMin = Vector2.zero;
+        r.offsetMax = Vector2.zero;
+        hurtOverlay.color = new Color(0.9f, 0.1f, 0.1f, 0.0f);
+    }
+
+    private void BuildInventoryWindow(RectTransform canvas)
+    {
+        const int columns = 5;
+        const float cell = 48.0f;
+        const float gap = 6.0f;
+
+        RectTransform panel = Panel(canvas, "InventoryWindow", panelSprite, new Vector2(0.5f, 0.5f), new Vector2(0, -20), new Vector2(300, 332));
+        panel.GetComponent<Image>().raycastTarget = true;   // 창 위 클릭이 공격으로 새지 않게
+        inventoryWindow = panel.gameObject;
+
+        TextMeshProUGUI title = Text(panel, "Title", "가방", 20, Brown, new Vector2(0.5f, 1), new Vector2(0, -14), new Vector2(200, 28), TextAlignmentOptions.Center);
+        title.fontStyle = FontStyles.Bold;
+
+        RectTransform close = Panel(panel, "Close", panelDarkSprite, new Vector2(1, 1), new Vector2(-10, -10), new Vector2(30, 30));
+        Text(close, "X", "X", 16, Color.white, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(30, 30), TextAlignmentOptions.Center).fontStyle = FontStyles.Bold;
+        close.GetComponent<Image>().raycastTarget = true;
+        close.gameObject.AddComponent<Button>().onClick.AddListener(() => inventoryWindow.SetActive(false));
+
+        float gridWidth = columns * cell + (columns - 1) * gap;
+        float startX = (300 - gridWidth) * 0.5f;
+
+        for (int i = 0; i < Protocol.InventorySlots; ++i)
+        {
+            int index = i;
+            float x = startX + (i % columns) * (cell + gap);
+            float y = -50 - (i / columns) * (cell + gap);
+
+            RectTransform slot = Panel(panel, "Slot" + i, panelDarkSprite, new Vector2(0, 1), new Vector2(x, y), new Vector2(cell, cell));
+            Image slotImage = slot.GetComponent<Image>();
+            slotImage.raycastTarget = true;
+            slot.gameObject.AddComponent<Button>().onClick.AddListener(() => NetworkClient.Instance?.SendUseItem(index));
+
+            // 마우스를 올리면 아래에 이름/설명
+            EventTrigger trigger = slot.gameObject.AddComponent<EventTrigger>();
+            var enter = new EventTrigger.Entry { eventID = EventTriggerType.PointerEnter };
+            enter.callback.AddListener(_ => ShowItemInfo(index));
+            trigger.triggers.Add(enter);
+
+            slotIcons[i] = Img(slot, "Icon", null, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(34, 34));
+            slotIcons[i].preserveAspect = true;
+
+            slotCounts[i] = Text(slot, "Count", "", 12, Color.white, new Vector2(1, 0), new Vector2(-4, 2), new Vector2(40, 16), TextAlignmentOptions.Right);
+            slotCounts[i].fontStyle = FontStyles.Bold;
+            slotCounts[i].outlineWidth = 0.25f;
+            slotCounts[i].outlineColor = new Color32(30, 20, 14, 255);
+
+            TextMeshProUGUI equipped = Text(slot, "Equipped", "E", 12, Gold, new Vector2(0, 1), new Vector2(4, -2), new Vector2(16, 16), TextAlignmentOptions.Left);
+            equipped.fontStyle = FontStyles.Bold;
+            equipped.outlineWidth = 0.25f;
+            equipped.outlineColor = new Color32(30, 20, 14, 255);
+            slotEquipped[i] = equipped.gameObject;
+        }
+
+        itemInfoText = Text(panel, "Info", "", 14, Brown, new Vector2(0.5f, 0), new Vector2(0, 40), new Vector2(270, 22), TextAlignmentOptions.Center);
+        Text(panel, "Hint", "클릭: 먹기 / 장착   ·   Q: 회복   ·   I: 닫기", 12, BrownSoft, new Vector2(0.5f, 0), new Vector2(0, 14), new Vector2(280, 18), TextAlignmentOptions.Center);
+
+        inventoryWindow.SetActive(false);
+    }
+
+    private void UpdateInventory(NetworkClient net)
+    {
+        bool chatting = ChatUI.Instance != null && ChatUI.Instance.IsChatting();
+
+        if (chatting == false)
+        {
+            if (Input.GetKeyDown(KeyCode.I))
+            {
+                inventoryWindow.SetActive(!inventoryWindow.activeSelf);
+            }
+
+            if (Input.GetKeyDown(KeyCode.Q))
+            {
+                EatBestHealItem(net);
+            }
+        }
+
+        int version = net.GetInventoryVersion();
+
+        if (version == lastInventoryVersion)
+        {
+            return;
+        }
+
+        lastInventoryVersion = version;
+        int equippedSlot = net.GetEquippedWeaponSlot();
+
+        for (int i = 0; i < Protocol.InventorySlots; ++i)
+        {
+            NetworkClient.InventorySlot slot = net.GetInventorySlot(i);
+            ItemTable.Def def = slot.itemId != 0 ? ItemTable.Find(slot.itemId) : null;
+
+            slotIcons[i].sprite = def != null ? def.Icon : null;
+            slotIcons[i].enabled = def != null;
+            slotCounts[i].text = (def != null && slot.count > 1) ? slot.count.ToString() : "";
+            slotEquipped[i].SetActive(i == equippedSlot);
+        }
+    }
+
+    // Q: 가방에서 회복량이 가장 작은 먹을 것부터(도토리 먼저). 아끼는 블루베리는 나중에.
+    private static void EatBestHealItem(NetworkClient net)
+    {
+        int best = -1;
+        ushort bestId = ushort.MaxValue;
+
+        for (int i = 0; i < Protocol.InventorySlots; ++i)
+        {
+            NetworkClient.InventorySlot slot = net.GetInventorySlot(i);
+            ItemTable.Def def = slot.itemId != 0 ? ItemTable.Find(slot.itemId) : null;
+
+            if (def != null && def.Kind == ItemTable.Kind.Consumable && slot.itemId < bestId)
+            {
+                best = i;
+                bestId = slot.itemId;   // id가 작을수록 회복량이 작다(도토리 1 < 블루베리 2)
+            }
+        }
+
+        if (best >= 0)
+        {
+            net.SendUseItem(best);
+        }
+    }
+
+    private void ShowItemInfo(int index)
+    {
+        NetworkClient net = NetworkClient.Instance;
+        if (net == null || itemInfoText == null)
+        {
+            return;
+        }
+
+        NetworkClient.InventorySlot slot = net.GetInventorySlot(index);
+        ItemTable.Def def = slot.itemId != 0 ? ItemTable.Find(slot.itemId) : null;
+        itemInfoText.text = def != null ? def.Name + "  ·  " + def.Description : "";
     }
 
     // 씬에 만들다 만 빈 상태창(StatWindow)이 있으면 HUD 상태창과 겹치므로 숨긴다.

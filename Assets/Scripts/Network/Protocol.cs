@@ -60,7 +60,15 @@ public static class Protocol
         // 2026-07-18: 하우징. 마찬가지로 맨 뒤에만 붙일 것.
         CS_HOUSE_ACTION = 14,
         SC_ZONE_CHANGE = 15,
-        SC_HOUSE_RESULT = 16
+        SC_HOUSE_RESULT = 16,
+
+        // 2026-11-13: 아이템 / 반격 (서버 protocol.h와 같은 순서)
+        CS_USE_ITEM = 17,
+        SC_INVENTORY = 18,
+        SC_ITEM_DROP = 19,
+        SC_ITEM_REMOVE = 20,
+        SC_ITEM_PICKUP = 21,
+        SC_PLAYER_FAINT = 22
     }
     public struct PlayerStatsData
     {
@@ -149,6 +157,20 @@ public static class Protocol
 
         int offset = 0;
         WriteHeader(packet, ref offset, PacketType.CS_HOUSE_ACTION);
+
+        return packet;
+    }
+
+    public const int InventorySlots = 20;
+
+    // 인벤토리 칸 사용(먹기 / 무기 장착·해제). 칸 번호 1바이트.
+    public static byte[] MakeUseItemPacket(int slot)
+    {
+        byte[] packet = new byte[HeaderSize + 1];
+
+        int offset = 0;
+        WriteHeader(packet, ref offset, PacketType.CS_USE_ITEM);
+        packet[offset] = (byte)slot;
 
         return packet;
     }

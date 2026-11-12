@@ -53,6 +53,7 @@ void GameServer::UpdateWorld(float deltaSeconds)
     std::vector<std::pair<std::uint32_t, SC_SPAWN_PACKET>> spawnSends;
     std::vector<std::pair<std::uint32_t, SC_DESPAWN_PACKET>> despawnSends;
     std::vector<std::pair<std::uint32_t, SC_ZONE_CHANGE_PACKET>> zoneChangeSends;
+    TickItemSends itemSends;   // 2026-11-13: 줍기/드랍 사라짐/몬스터에게 맞음/쓰러짐
 
     {
         std::lock_guard<std::mutex> lock(playersLock);
@@ -206,6 +207,11 @@ void GameServer::UpdateWorld(float deltaSeconds)
 
         UpdateMonsterRespawn(deltaSeconds, monsterMovers);
         UpdateMonsters(deltaSeconds, monsterMovers);
+
+        // 2026-11-13: 붙어 있는 몬스터가 문다. 쓰러진 사람은 광장으로 옮겨 playerMovers에 넣는다
+        // (아래 3) 시야 diff보다 먼저여야 순간이동한 자리 기준으로 주변이 다시 계산된다).
+        UpdateMonsterAttacks(deltaSeconds, playerMovers, itemSends);
+        UpdateGroundDrops(deltaSeconds, itemSends);
 
         t2 = profClock::now();
 
@@ -528,6 +534,14 @@ void GameServer::UpdateWorld(float deltaSeconds)
     {
         SendPacket(targetId, &packet, packet.size);
     }
+
+    // 아이템 / 반격
+    for (auto& [targetId, packet] : itemSends.damages)     { SendPacket(targetId, &packet, packet.size); }
+    for (auto& [targetId, packet] : itemSends.faints)      { SendPacket(targetId, &packet, packet.size); }
+    for (auto& [targetId, stats] : itemSends.stats)        { SendStatUpdate(targetId, stats); }
+    for (auto& [targetId, packet] : itemSends.removes)     { SendPacket(targetId, &packet, packet.size); }
+    for (auto& [targetId, packet] : itemSends.pickups)     { SendPacket(targetId, &packet, packet.size); }
+    for (auto& [targetId, packet] : itemSends.inventories) { SendInventory(targetId, packet); }
 
     if (profileEnabled)
     {

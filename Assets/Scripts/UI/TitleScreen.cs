@@ -122,7 +122,7 @@ public class TitleScreen : MonoBehaviour
         statusText = NewText(panelRect, "Status", "", 13, BrownSoft, font, new Vector2(0.5f, 0), new Vector2(0, -26), new Vector2(340, 20));
 
         // 조작 안내
-        TextMeshProUGUI hint = NewText(root, "Hint", "WASD 이동   ·   클릭 공격   ·   T 집 짓기   ·   Tab 상태창",
+        TextMeshProUGUI hint = NewText(root, "Hint", "WASD 이동  ·  클릭 공격  ·  I 가방  ·  Q 회복  ·  T 집  ·  Tab 상태",
                                        14, Color.white, font, new Vector2(0.5f, 0), new Vector2(0, 16), new Vector2(760, 24));
         hint.outlineWidth = 0.25f;
         hint.outlineColor = new Color32(60, 40, 30, 255);
