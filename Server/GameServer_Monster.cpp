@@ -283,7 +283,30 @@ void GameServer::UpdateMonsters(float deltaSeconds, std::vector<std::uint32_t>& 
         float newY = 0.0f;
         bool moved = false;
 
-        // 2026-11-13: 맞아서 화가 난 동안은 원래 행동 대신 때린 사람을 쫓는다(추격 로직 재사용).
+        // 2026-11-13: 순둥 몬스터가 맞았으면 정해진 시간 동안 때린 쪽 반대로 도망간다.
+        if (monster.GetFleeTimer() > 0.0f)
+        {
+            monster.TickFlee(deltaSeconds);
+            const float step = MONSTER_MOVE_SPEED * MONSTER_FLEE_SPEED_SCALE * deltaSeconds;
+            newX = monster.GetX() + monster.GetFleeDirX() * step;
+            newY = monster.GetY() + monster.GetFleeDirY() * step;
+            moved = true;
+        }
+
+        // 2026-11-13: 적대 몬스터(추격형이 아닌 무당벌레)는 가까이 온 플레이어를 알아채고 먼저 쫓아온다.
+        // 이미 쫓는 중이면 타겟이 가까이 있는 동안 계속 화가 나 있다(멀어지면 8초 뒤 포기).
+        if (moved == false && monster.IsHostile() && monster.GetBehavior() != MonsterBehavior::Chase)
+        {
+            std::uint32_t seen = FindNearestPlayer(monster.GetX(), monster.GetY(), MONSTER_HOSTILE_DETECT);
+
+            if (seen != 0 && (monster.GetTargetId() == 0 || monster.GetTargetId() == seen))
+            {
+                monster.SetTargetId(seen);
+                monster.SetAggroTimer(MONSTER_AGGRO_SEC);
+            }
+        }
+
+        // 화가 난 동안은 원래 행동 대신 타겟을 쫓는다(추격 로직 재사용).
         // 시간이 끝나면 타겟을 놓고 원래 행동(배회/순찰)으로 돌아간다. 추격형은 원래 쫓는 놈이라 그대로.
         float aggro = monster.GetAggroTimer();
 
@@ -300,11 +323,14 @@ void GameServer::UpdateMonsters(float deltaSeconds, std::vector<std::uint32_t>& 
 
         const bool angry = monster.GetAggroTimer() > 0.0f;
 
-        switch (angry ? MonsterBehavior::Chase : monster.GetBehavior())
+        if (moved == false)   // 도망 중이 아니면 평소 행동
         {
-        case MonsterBehavior::Wander: moved = StepWander(monster, deltaSeconds, newX, newY); break;
-        case MonsterBehavior::Patrol: moved = StepPatrol(monster, deltaSeconds, newX, newY); break;
-        case MonsterBehavior::Chase:  moved = StepChase(monster, deltaSeconds, newX, newY);  break;
+            switch (angry ? MonsterBehavior::Chase : monster.GetBehavior())
+            {
+            case MonsterBehavior::Wander: moved = StepWander(monster, deltaSeconds, newX, newY); break;
+            case MonsterBehavior::Patrol: moved = StepPatrol(monster, deltaSeconds, newX, newY); break;
+            case MonsterBehavior::Chase:  moved = StepChase(monster, deltaSeconds, newX, newY);  break;
+            }
         }
 
         if (moved == false)
@@ -349,4 +375,42 @@ void GameServer::UpdateMonsters(float deltaSeconds, std::vector<std::uint32_t>& 
         sectorGrid.Move(id, oldX, oldY, newX, newY);
         movers.push_back(id);
     }
+}
+
+// (x, y)에서 radius 안의 가장 가까운 월드 플레이어. 없으면 0. 섹터 격자로 주변 후보만 본다.
+// playersLock을 잡은 상태에서.
+std::uint32_t GameServer::FindNearestPlayer(float x, float y, float radius)
+{
+    std::vector<std::uint32_t> nearby;
+    sectorGrid.GatherNearby(x, y, nearby);
+
+    std::uint32_t best = 0;
+    float bestSqr = radius * radius;
+
+    for (std::uint32_t id : nearby)
+    {
+        if (IsMonsterId(id) || IsHouseId(id))
+        {
+            continue;
+        }
+
+        auto iter = players.find(id);
+
+        if (iter == players.end())
+        {
+            continue;
+        }
+
+        float dx = iter->second.GetX() - x;
+        float dy = iter->second.GetY() - y;
+        float distSqr = dx * dx + dy * dy;
+
+        if (distSqr <= bestSqr)
+        {
+            bestSqr = distSqr;
+            best = id;
+        }
+    }
+
+    return best;
 }

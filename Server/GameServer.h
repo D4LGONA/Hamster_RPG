@@ -74,7 +74,8 @@ private:
         std::vector<std::pair<std::uint32_t, SC_PLAYER_FAINT_PACKET>> faints;
     };
     void UpdateGroundDrops(float deltaSeconds, TickItemSends& sends);
-    void ClearDropsOf(std::uint32_t ownerId);   // playersLock 안에서. 집에 들어갈 때
+    void ClearDropsOf(std::uint32_t ownerId);
+    std::uint32_t FindNearestPlayer(float x, float y, float radius);   // playersLock 안에서   // playersLock 안에서. 집에 들어갈 때
     void UpdateMonsterAttacks(float deltaSeconds, std::vector<std::uint32_t>& playerMovers, TickItemSends& sends);
 public:
     // 종료 직전 저장. 남은 DB 작업을 다 끝낼 때까지 기다린다(main.cpp 콘솔 종료 핸들러).
@@ -327,7 +328,10 @@ private:
 
     static constexpr float DROP_TTL_SEC = 60.0f;          // 안 주우면 1분 뒤 사라진다
     static constexpr float DROP_PICKUP_RADIUS = 1.0f;     // 이만큼 다가가면 자동으로 줍는다
-    static constexpr float MONSTER_AGGRO_SEC = 8.0f;      // 맞은 몬스터가 쫓아오는 시간
+    static constexpr float MONSTER_AGGRO_SEC = 8.0f;      // 적대 몬스터가 한 번 물면 쫓아오는 시간(가까이 있으면 계속 연장)
+    static constexpr float MONSTER_HOSTILE_DETECT = 5.0f; // 적대 몬스터(무당벌레)가 플레이어를 알아채는 거리
+    static constexpr float MONSTER_FLEE_SEC = 2.5f;       // 순둥 몬스터(애벌레)가 맞고 도망가는 시간
+    static constexpr float MONSTER_FLEE_SPEED_SCALE = 1.4f;
     static constexpr float MONSTER_ATTACK_RANGE = 1.3f;   // 추격은 1.0에서 멈추므로 붙으면 닿는다
     static constexpr float MONSTER_ATTACK_COOLDOWN = 1.2f;
     static constexpr float FAINT_GOLD_LOSS = 0.1f;        // 쓰러지면 골드 10%를 잃는다

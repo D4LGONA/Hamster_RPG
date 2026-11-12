@@ -85,6 +85,9 @@ public class MonsterEntity : MonoBehaviour
             label.text = display ?? "";
             label.gameObject.SetActive(display != null);
 
+            // 순둥(애벌레)은 흰 이름, 먼저 덤비는 몬스터는 빨간 이름. 보스는 아래에서 금색으로 덮는다.
+            label.color = Kind == "Caterpillar" ? Color.white : new Color32(255, 110, 110, 255);
+
             if (Kind == "CatBoss")
             {
                 label.color = new Color32(255, 214, 90, 255);   // 보스는 금색 이름

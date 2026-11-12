@@ -68,6 +68,7 @@ public:
         targetId = 0;
         aggroTimer = 0.0f;
         attackCooldown = 0.0f;
+        fleeTimer = 0.0f;
     }
 
     // 나를 보고 있는 playerId 집합. 이동/피격/죽음을 이들에게만 전송한다.
@@ -87,7 +88,34 @@ public:
     void SetPatrolIndex(std::size_t value) { patrolIndex = value; }
 
     // --- Chase 상태값. 추격 중인 playerId. 0이면 없음. ---
-    // 2026-11-13: 반격. 맞으면 aggroTimer 동안 때린 사람을 쫓아와 문다(배회/순찰 몬스터도).
+    // 2026-11-13: 적대(선공) / 순둥(비선공).
+    //   적대 = 무당벌레, 고양이 대장: 가까이 온 플레이어를 먼저 쫓아와 문다.
+    //   순둥 = 애벌레: 절대 물지 않는다. 맞으면 때린 쪽 반대로 잠깐 도망간다.
+    bool IsHostile() const { return kind != WorldGen::MonsterKind::Caterpillar; }
+
+    float GetFleeTimer() const { return fleeTimer; }
+    void StartFlee(float fromX, float fromY, float seconds)
+    {
+        float awayX = x - fromX;
+        float awayY = y - fromY;
+        float length = std::sqrt(awayX * awayX + awayY * awayY);
+
+        if (length < 0.001f)
+        {
+            awayX = 1.0f;   // 같은 자리에서 맞았으면 아무 쪽으로나
+            awayY = 0.0f;
+            length = 1.0f;
+        }
+
+        fleeDirX = awayX / length;
+        fleeDirY = awayY / length;
+        fleeTimer = seconds;
+    }
+    void TickFlee(float deltaSeconds) { fleeTimer = fleeTimer > deltaSeconds ? fleeTimer - deltaSeconds : 0.0f; }
+    float GetFleeDirX() const { return fleeDirX; }
+    float GetFleeDirY() const { return fleeDirY; }
+
+    // 적대 몬스터의 추격. aggroTimer 동안 targetId를 쫓아와 문다.
     float GetAggroTimer() const { return aggroTimer; }
     void SetAggroTimer(float value) { aggroTimer = value; }
     float GetAttackCooldown() const { return attackCooldown; }
@@ -125,4 +153,7 @@ private:
     std::uint32_t targetId = 0;
     float aggroTimer = 0.0f;
     float attackCooldown = 0.0f;
+    float fleeTimer = 0.0f;
+    float fleeDirX = 0.0f;
+    float fleeDirY = 0.0f;
 };

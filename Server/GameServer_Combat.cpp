@@ -95,9 +95,16 @@ void GameServer::ProcessAttack(std::uint32_t playerId, const CS_ATTACK_PACKET* p
 
             if (monster.IsAlive())
             {
-                // 2026-11-13: 반격. 맞은 몬스터는 잠깐 때린 사람을 쫓아온다(UpdateMonsters / UpdateMonsterAttacks).
-                monster.SetTargetId(playerId);
-                monster.SetAggroTimer(MONSTER_AGGRO_SEC);
+                // 2026-11-13: 적대 몬스터는 때린 사람을 쫓아와 문다. 순둥한 애벌레는 반대쪽으로 도망간다.
+                if (monster.IsHostile())
+                {
+                    monster.SetTargetId(playerId);
+                    monster.SetAggroTimer(MONSTER_AGGRO_SEC);
+                }
+                else
+                {
+                    monster.StartFlee(attacker.GetX(), attacker.GetY(), MONSTER_FLEE_SEC);
+                }
             }
             else
             {

@@ -16,7 +16,7 @@ namespace
     {
         switch (kind)
         {
-        case WorldGen::MonsterKind::Caterpillar: return { 20, 10, 5 };
+        case WorldGen::MonsterKind::Caterpillar: return { 20, 10, 0 };   // 순둥: 물지 않는다
         case WorldGen::MonsterKind::Ladybug:     return { 35, 15, 8 };
         case WorldGen::MonsterKind::CatBoss:     return { 400, 200, 20 };
         }
@@ -213,9 +213,9 @@ void GameServer::UpdateMonsterAttacks(float deltaSeconds, std::vector<std::uint3
 
     for (auto& [monsterId, monster] : monsters)
     {
-        if (monster.IsAlive() == false)
+        if (monster.IsAlive() == false || monster.IsHostile() == false)
         {
-            continue;
+            continue;   // 순둥한 애벌레는 물지 않는다
         }
 
         float cooldown = monster.GetAttackCooldown() - deltaSeconds;
