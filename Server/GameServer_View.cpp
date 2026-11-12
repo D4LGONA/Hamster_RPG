@@ -23,7 +23,16 @@ SC_SPAWN_PACKET GameServer::MakeSpawnPacket(const Monster& monster)
     spawn.size = sizeof(SC_SPAWN_PACKET);
     spawn.type = PACKET_TYPE::SC_SPAWN;
     spawn.id = monster.GetId();
-    strncpy_s(spawn.name, sizeof(spawn.name), "Monster", _TRUNCATE);
+    // 몬스터는 이름 칸에 종류를 싣는다. 패킷 모양을 안 바꿔서 부하 테스트 봇도 그대로 돈다.
+    // 클라 MonsterEntity가 이 문자열로 스프라이트를 고른다.
+    const char* kindName = "Caterpillar";
+    switch (monster.GetKind())
+    {
+    case WorldGen::MonsterKind::Caterpillar: kindName = "Caterpillar"; break;
+    case WorldGen::MonsterKind::Ladybug:     kindName = "Ladybug";     break;
+    case WorldGen::MonsterKind::CatBoss:     kindName = "CatBoss";     break;
+    }
+    strncpy_s(spawn.name, sizeof(spawn.name), kindName, _TRUNCATE);
     spawn.x = monster.GetX();
     spawn.y = monster.GetY();
     spawn.entityType = ENTITY_MONSTER;

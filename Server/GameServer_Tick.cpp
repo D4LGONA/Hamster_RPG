@@ -95,20 +95,20 @@ void GameServer::UpdateWorld(float deltaSeconds)
 
             // 이미 집 안에 파묻힌 상태라면 충돌을 끈다. 안 그러면 양쪽 축이 다 막혀
             // 영영 못 빠져나온다(집이 생기는 순간 겹쳤다면 그럴 수 있다).
-            const bool stuckInside = IsBlockedByHouse(oldX, oldY);
+            const bool stuckInside = IsBlocked(oldX, oldY);
 
             // 축을 따로 판정한다. 한 축이 막혀도 다른 축으로는 미끄러지게 하려는 것이다.
             // 한 번에 판정해 막아버리면 벽에 비스듬히 붙었을 때 아예 못 움직인다.
             float newX = oldX + ix * speed * deltaSeconds;
 
-            if (stuckInside == false && IsBlockedByHouse(newX, oldY))
+            if (stuckInside == false && IsBlocked(newX, oldY))
             {
                 newX = oldX;
             }
 
             float newY = oldY + iy * speed * deltaSeconds;
 
-            if (stuckInside == false && IsBlockedByHouse(newX, newY))
+            if (stuckInside == false && IsBlocked(newX, newY))
             {
                 newY = oldY;
             }
@@ -191,6 +191,11 @@ void GameServer::UpdateWorld(float deltaSeconds)
         // 2) 죽은 몬스터 부활 + 살아있는 몬스터 배회. 위치를 여기서 다 확정해두고 아래 diff들을 돌린다.
         // 되살아난 놈은 watchers가 비어 있어서, 아래 (4)가 주변 플레이어 전원을 신규로 보고 spawn을 쏜다.
         std::vector<std::uint32_t> monsterMovers;
+
+        // 플레이어 주변 청크를 켜고(새 몬스터) 오래 빈 청크는 끈다(몬스터 제거 + despawn).
+        // 새 몬스터는 watchers가 비어 있어서, 아래 (4) diff가 주변 플레이어에게 spawn을 쏴준다(부활과 같은 길).
+        UpdateChunks(deltaSeconds, monsterMovers, despawnSends);
+
         UpdateMonsterRespawn(deltaSeconds, monsterMovers);
         UpdateMonsters(deltaSeconds, monsterMovers);
 
@@ -552,16 +557,23 @@ void GameServer::ReportTickProfile()
     }
 
     std::size_t playerCount = 0;
+    std::size_t chunkCount = 0;
+    std::size_t monsterCount = 0;
+    std::size_t sectorCount = 0;
 
     {
         std::lock_guard<std::mutex> lock(playersLock);
         playerCount = players.size();
+        chunkCount = chunks.size();
+        monsterCount = monsters.size();
+        sectorCount = sectorGrid.GetCellCount();
     }
 
     const double n = static_cast<double>(prof.samples);
 
     std::cout << std::fixed << std::setprecision(2)
               << "[TICK] players=" << playerCount
+              << " chunks=" << chunkCount << " monsters=" << monsterCount << " sectors=" << sectorCount
               << " ticks=" << prof.samples
               << " | avg " << (prof.total / n) << "ms (max " << prof.maxTotal << ")"
               << " | lock " << (prof.lockWait / n)

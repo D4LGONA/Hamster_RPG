@@ -227,7 +227,7 @@ struct SC_HOUSE_RESULT_PACKET
     PACKET_TYPE type;
 
     std::uint8_t success;
-    std::uint8_t reason;   // 0 성공 / 1 다른 집과 너무 가까움 / 2 월드 밖 / 3 몬스터 자리
+    std::uint8_t reason;   // 0 성공 / 1 다른 집과 너무 가까움 / 2 월드 밖 / 3 몬스터 자리 / 4 장애물(나무 등) 위
 };
 
 struct SC_STAT_UPDATE_PACKET

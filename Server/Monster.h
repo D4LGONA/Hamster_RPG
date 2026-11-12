@@ -5,6 +5,7 @@
 
 #include "stdafx.h"
 #include <unordered_set>
+#include "WorldGen.h"
 
 // 몬스터 행동 타입. 이 값에 따라 GameServer가 매 틱 어떤 이동 함수를 부를지 고른다.
 enum class MonsterBehavior : std::uint8_t
@@ -19,8 +20,9 @@ class Monster
 public:
     Monster() = default;
 
-    Monster(std::uint32_t newId, MonsterBehavior newBehavior, float newX, float newY, int newMaxHp)
-        : id(newId), behavior(newBehavior)
+    Monster(std::uint32_t newId, MonsterBehavior newBehavior, float newX, float newY, int newMaxHp,
+            WorldGen::MonsterKind newKind = WorldGen::MonsterKind::Caterpillar)
+        : id(newId), behavior(newBehavior), kind(newKind)
         , x(newX), y(newY)
         , spawnX(newX), spawnY(newY)
         , hp(newMaxHp), maxHp(newMaxHp)
@@ -28,6 +30,7 @@ public:
 
     std::uint32_t GetId() const { return id; }
     MonsterBehavior GetBehavior() const { return behavior; }
+    WorldGen::MonsterKind GetKind() const { return kind; }   // 외형/체력 구분. 클라에는 스폰 패킷 name으로 전한다
 
     float GetX() const { return x; }
     float GetY() const { return y; }
@@ -88,6 +91,7 @@ public:
 private:
     std::uint32_t id = 0;
     MonsterBehavior behavior = MonsterBehavior::Wander;
+    WorldGen::MonsterKind kind = WorldGen::MonsterKind::Caterpillar;
 
     float x = 0.0f;
     float y = 0.0f;

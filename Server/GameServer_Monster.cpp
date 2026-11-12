@@ -3,35 +3,6 @@
 #include "stdafx.h"
 #include "GameServer.h"
 
-// 서버 시작 시 월드에 몬스터를 배치한다. 아직 다른 스레드가 없을 때 호출(락 불필요).
-// 여기 좌표가 각 몬스터의 '집'이 되고, 배회 반경/순찰 경유지/복귀 지점이 전부 이걸 기준으로 잡힌다.
-void GameServer::SpawnInitialMonsters()
-{
-    struct SpawnEntry
-    {
-        MonsterBehavior behavior;
-        float x;
-        float y;
-    };
-
-    const SpawnEntry entries[] = {
-        { MonsterBehavior::Wander,  6.0f,  0.0f },
-        { MonsterBehavior::Wander, -6.0f,  0.0f },
-        { MonsterBehavior::Patrol,  0.0f,  6.0f },
-        { MonsterBehavior::Chase,   0.0f, -6.0f },
-        { MonsterBehavior::Wander,  9.0f,  9.0f },
-    };
-
-    for (const SpawnEntry& entry : entries)
-    {
-        std::uint32_t id = nextMonsterId++;
-        monsters.emplace(id, Monster{ id, entry.behavior, entry.x, entry.y, 30 });
-        sectorGrid.Add(id, entry.x, entry.y);
-    }
-
-    std::cout << "[MONSTER] spawned " << monsters.size() << " monsters" << std::endl;
-}
-
 // 배회 방향을 새로 뽑는다. 계속 움직이면 부자연스러워서 절반은 그냥 쉰다.
 void GameServer::PickWanderDirection(Monster& monster)
 {
@@ -330,17 +301,17 @@ void GameServer::UpdateMonsters(float deltaSeconds, std::vector<std::uint32_t>& 
         // 집을 통과하지 못하게 한다. 플레이어는 집에 못 들어가는데 몬스터만 들어갈 수 있으면
         // 집 안에 들어앉은 몬스터를 아무도 잡을 수 없게 된다.
         // 이미 안에 있다면(집이 나중에 지어진 경우) 충돌을 꺼서 걸어 나올 수 있게 둔다.
-        const bool monsterStuckInside = IsBlockedByHouse(oldX, oldY);
+        const bool monsterStuckInside = IsBlocked(oldX, oldY);
 
         if (monsterStuckInside == false)
         {
             // 플레이어와 같은 방식으로 축을 따로 판정해 벽을 따라 미끄러지게 한다.
-            if (IsBlockedByHouse(newX, oldY))
+            if (IsBlocked(newX, oldY))
             {
                 newX = oldX;
             }
 
-            if (IsBlockedByHouse(newX, newY))
+            if (IsBlocked(newX, newY))
             {
                 newY = oldY;
             }

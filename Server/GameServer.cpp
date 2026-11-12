@@ -29,8 +29,7 @@ void GameServer::Run()
 
     PostAccept();
 
-    // 월드에 몬스터 배치. (아직 워커/틱 스레드가 없어 락 불필요)
-    SpawnInitialMonsters();
+    // 몬스터는 미리 깔지 않는다. 플레이어가 다가가는 청크마다 게임 틱이 만든다(GameServer_Chunk.cpp).
 
     // 서버 권위 이동: 게임 틱 루프 스레드. 위치 계산/시야 갱신은 오직 이 스레드에서만 한다.
     std::thread tickThread(&GameServer::GameTickThread, this);

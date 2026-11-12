@@ -11,6 +11,7 @@
 #include "Monster.h"
 #include "House.h"
 #include "SectorGrid.h"
+#include "WorldGen.h"
 
 enum class PACKET_CHECK
 {
@@ -73,10 +74,16 @@ private:
     // 몬스터: 별도 맵으로 관리하되 섹터그리드/시야엔 함께 태운다.
     static bool IsMonsterId(std::uint32_t id) { return id >= MONSTER_ID_BASE; }
     bool GetEntityPosition(std::uint32_t id, float& x, float& y);   // player/monster 공통 위치 조회
-    void SpawnInitialMonsters();
 
     // 몬스터 AI. 아래 전부 게임 틱 스레드에서 playersLock을 잡은 상태로만 호출한다.
-    void UpdateMonsters(float deltaSeconds, std::vector<std::uint32_t>& movers);   // 이동 -> 움직인 몬스터 수집
+    void UpdateMonsters(float deltaSeconds, std::vector<std::uint32_t>& movers);
+
+    // 무한 월드 청크. 플레이어 주변 청크를 켜서 몬스터를 만들고, 오래 아무도 없던 청크는 몬스터째 지운다.
+    // 게임 틱 스레드에서 playersLock을 잡은 상태로만 호출한다.
+    void UpdateChunks(float deltaSeconds, std::vector<std::uint32_t>& spawned,
+                      std::vector<std::pair<std::uint32_t, SC_DESPAWN_PACKET>>& despawnSends);
+    void ActivateChunk(int chunkX, int chunkY, std::vector<std::uint32_t>& spawned);
+    void UnloadChunk(std::int64_t key, std::vector<std::pair<std::uint32_t, SC_DESPAWN_PACKET>>& despawnSends);   // 이동 -> 움직인 몬스터 수집
 
     // 행동 타입별 이동. 이번 틱의 목표 위치를 outX/outY에 넣고, 실제로 움직였으면 true.
     // 경계 clamp / 섹터그리드 갱신 / movers 수집은 호출부(UpdateMonsters)가 공통으로 처리하므로
@@ -121,6 +128,8 @@ private:
 
     // (x, y)에 플레이어가 서 있을 때 집에 파묻히는가. 이동을 막는 데 쓴다.
     bool IsBlockedByHouse(float x, float y);
+    // 집 + 월드 장애물(나무/덤불/돌)을 같이 본다. 플레이어와 몬스터 이동은 이걸 쓴다.
+    bool IsBlocked(float x, float y) { return IsBlockedByHouse(x, y) || WorldGen::IsBlocked(x, y, PLAYER_RADIUS); }
 
     // (x, y)가 어느 집 문에 닿아 있는가. 닿아 있으면 그 집 id를 outHouseId에 넣고 true.
     bool IsAtHouseDoor(float x, float y, std::uint32_t& outHouseId);
@@ -263,4 +272,17 @@ private:
 
     // 섹터 격자도 playersLock으로 함께 보호한다(위치/뷰리스트와 항상 같이 바뀌므로). 몬스터도 여기 들어간다.
     SectorGrid sectorGrid;
+
+    // 켜진 청크. key = (chunkY << 32) | chunkX. playersLock으로 보호.
+    struct ChunkState
+    {
+        std::vector<std::uint32_t> monsterIds;   // 이 청크가 낳은 몬스터. 돌아다니다 청크를 벗어나도 여기 소속
+        float idleSeconds = 0.0f;                // 주변에 아무도 없던 시간
+    };
+    std::unordered_map<std::int64_t, ChunkState> chunks;
+    float chunkScanTimer = 0.0f;
+
+    static constexpr int CHUNK_ACTIVE_RADIUS = 2;            // 플레이어 청크 기준 5x5를 켠다(시야 20 + 이동 여유)
+    static constexpr float CHUNK_SCAN_INTERVAL = 0.5f;       // 매 틱 할 필요 없다. 0.5초에 2.5유닛밖에 못 간다
+    static constexpr float CHUNK_UNLOAD_IDLE_SEC = 30.0f;    // 이만큼 비어 있으면 몬스터째 지운다(금방 돌아오면 그대로)
 };

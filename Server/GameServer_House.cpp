@@ -165,6 +165,13 @@ bool GameServer::PlaceHouse(Player& owner, std::uint8_t& reason,
         return false;
     }
 
+    // 나무/덤불/돌 위에는 못 짓는다. 지으면 집이 장애물을 덮어 그림과 충돌이 어긋난다.
+    if (WorldGen::IsAreaBlocked(x, y, HOUSE_HALF))
+    {
+        reason = 4;
+        return false;
+    }
+
     // 집을 추가하기 전에 주변을 훑는다. 거리 검사와 spawn 대상 찾기에 같이 쓴다.
     std::vector<std::uint32_t> nearby;
     sectorGrid.GatherNearby(x, y, nearby);

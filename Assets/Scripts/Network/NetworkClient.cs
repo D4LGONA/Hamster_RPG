@@ -727,6 +727,10 @@ public class NetworkClient : MonoBehaviour
             {
                 ChatUI.Instance.AddSystemMessage("몬스터가 사는 자리입니다. 다른 곳에 지어보세요.");
             }
+            else if (reason == 4)
+            {
+                ChatUI.Instance.AddSystemMessage("나무나 돌이 있는 자리입니다. 빈 풀밭에 지어보세요.");
+            }
             else
             {
                 ChatUI.Instance.AddSystemMessage("집을 짓지 못했습니다.");
@@ -764,7 +768,7 @@ public class NetworkClient : MonoBehaviour
     {
         if (entityType == Protocol.EntityMonster)
         {
-            SpawnMonster(id, position);
+            SpawnMonster(id, name, position);
         }
         else if (entityType == Protocol.EntityHouse)
         {
@@ -831,7 +835,7 @@ public class NetworkClient : MonoBehaviour
         Log("[NETWORK] Spawn remote player. id = " + id + ", name = " + name + ", x = " + position.x + ", y = " + position.y);
     }
 
-    private void SpawnMonster(uint id, Vector2 position)
+    private void SpawnMonster(uint id, string kind, Vector2 position)
     {
         if (monsters.ContainsKey(id))
         {
@@ -857,6 +861,7 @@ public class NetworkClient : MonoBehaviour
             return;
         }
 
+        monster.SetKind(kind);   // 몬스터는 name 칸에 종류가 온다(서버 GameServer_View.cpp)
         monster.SetTargetPosition(position);
         monsters.Add(id, monster);
 

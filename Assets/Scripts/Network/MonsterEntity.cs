@@ -3,8 +3,17 @@ using UnityEngine;
 // 서버가 소유하는 몬스터를 클라에서 표시. 위치는 서버가 준 값으로 보간(RemotePlayer와 동일 방식).
 // NetworkClient가 SC_SPAWN(몬스터)로 생성하고, SC_MOVEOBJECT로 SetTargetPosition을 호출한다.
 // 2026-07-18: 전투 추가. hp/데미지/죽음은 전부 서버가 정하고 여기서는 받은 값을 보여주기만 한다.
+// 2026-11-12: 몬스터 종류(애벌레/무당벌레/고양이 보스)별 외형. 서버가 스폰 패킷 name 칸에 종류를 실어 보낸다.
+//             시트는 Resources/Monsters/ 에 있고 4방향 x 4프레임(줄: 정면/오른쪽/왼쪽/뒤). 움직이는 방향으로 걷기 프레임을 돌린다.
 public class MonsterEntity : MonoBehaviour
 {
+    [Header("Walk Animation")]
+    [SerializeField] private float walkFps = 8.0f;
+
+    private Sprite[] frames;          // 16장. 없으면(종류 모름) 프리팹 기본 외형 그대로
+    private int facingRow;            // 0 정면, 1 오른쪽, 2 왼쪽, 3 뒤
+    private float walkClock;
+    private float movingUntil;
     [Header("Interpolation")]
     // 서버 브로드캐스트 주기(15Hz ≈ 0.066초)보다 살짝 길게.
     [SerializeField] private float interpDuration = 0.08f;
@@ -55,8 +64,81 @@ public class MonsterEntity : MonoBehaviour
         hasTarget = false;
     }
 
+    // NetworkClient가 스폰 직후 부른다. kind = 서버 GameServer_View.cpp 의 이름("Caterpillar" 등)
+    public void SetKind(string kind)
+    {
+        string sheet = null;
+        switch (kind)
+        {
+            case "Caterpillar": sheet = "Monsters/Monster_Caterpillar"; break;
+            case "Ladybug":     sheet = "Monsters/Monster_Ladybug"; break;
+            case "CatBoss":     sheet = "Monsters/Boss_Cat"; break;
+        }
+
+        if (sheet == null || spriteRenderer == null)
+        {
+            return;
+        }
+
+        Sprite[] sliced = Resources.LoadAll<Sprite>(sheet);
+
+        if (sliced == null || sliced.Length < 16)
+        {
+            Debug.LogWarning("[MONSTER] 시트를 찾지 못했습니다: " + sheet);
+            return;
+        }
+
+        frames = WorldMapView.SortByIndex(sliced, 16);
+
+        // 프리팹의 햄스터 애니메이터가 매 프레임 스프라이트를 덮어쓰므로 끈다.
+        Animator animator = GetComponentInChildren<Animator>();
+        if (animator != null)
+        {
+            animator.enabled = false;
+        }
+
+        spriteRenderer.sprite = frames[0];
+
+        // 보스는 그림이 두 배(4유닛)라서 체력바를 머리 위로 올린다.
+        if (kind == "CatBoss")
+        {
+            EnsureHealthBar();
+            if (healthBar != null)
+            {
+                healthBar.transform.localPosition += new Vector3(0.0f, 1.2f, 0.0f);
+            }
+        }
+    }
+
+    private void UpdateWalkAnimation()
+    {
+        if (frames == null || spriteRenderer == null)
+        {
+            return;
+        }
+
+        int frame = 0;
+
+        if (Time.time < movingUntil)
+        {
+            walkClock += Time.deltaTime * walkFps;
+            frame = (int)walkClock % 4;
+        }
+        else
+        {
+            walkClock = 0.0f;
+        }
+
+        Sprite next = frames[facingRow * 4 + frame];
+        if (next != null)
+        {
+            spriteRenderer.sprite = next;
+        }
+    }
+
     private void Update()
     {
+        UpdateWalkAnimation();
         UpdateInterpolation();
         UpdateHitFlash();
         UpdateDeath();
@@ -117,6 +199,21 @@ public class MonsterEntity : MonoBehaviour
     public void SetTargetPosition(Vector2 position)
     {
         Vector3 next = new Vector3(position.x, position.y, transform.position.z);
+
+        // 바라보는 방향: 많이 움직인 축을 따른다. 이동 패킷이 끊기면 잠시 뒤 서 있는 자세로.
+        Vector2 delta = (Vector2)(next - transform.position);
+        if (delta.sqrMagnitude > 0.0001f)
+        {
+            if (Mathf.Abs(delta.x) > Mathf.Abs(delta.y))
+            {
+                facingRow = delta.x > 0.0f ? 1 : 2;
+            }
+            else
+            {
+                facingRow = delta.y > 0.0f ? 3 : 0;
+            }
+            movingUntil = Time.time + 0.2f;
+        }
 
         if (Vector2.Distance(transform.position, next) >= snapDistance)
         {
