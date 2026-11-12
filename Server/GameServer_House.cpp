@@ -293,6 +293,10 @@ void GameServer::EnterHouse(Player& player, House& house,
 {
     const std::uint32_t myId = player.GetId();
 
+    // 2026-11-13: 집에 들어가면 바닥에 남겨둔 내 드랍은 사라진다(클라도 씬을 바꾸며 그림을 지운다).
+    // 안 지우면 그림은 없는데 나와서 걸으면 주워지는, 안 보이는 아이템이 남는다.
+    ClearDropsOf(myId);
+
     sectorGrid.Remove(myId, player.GetX(), player.GetY());
     ClearView(player, despawnSends);
 

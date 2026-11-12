@@ -74,6 +74,7 @@ private:
         std::vector<std::pair<std::uint32_t, SC_PLAYER_FAINT_PACKET>> faints;
     };
     void UpdateGroundDrops(float deltaSeconds, TickItemSends& sends);
+    void ClearDropsOf(std::uint32_t ownerId);   // playersLock 안에서. 집에 들어갈 때
     void UpdateMonsterAttacks(float deltaSeconds, std::vector<std::uint32_t>& playerMovers, TickItemSends& sends);
 public:
     // 종료 직전 저장. 남은 DB 작업을 다 끝낼 때까지 기다린다(main.cpp 콘솔 종료 핸들러).

@@ -317,3 +317,19 @@ void GameServer::UpdateMonsterAttacks(float deltaSeconds, std::vector<std::uint3
         }
     }
 }
+
+// 이 사람의 바닥 드랍을 전부 지운다. 패킷은 안 보낸다(집에 들어가는 중이라 클라가 씬째 지운다).
+void GameServer::ClearDropsOf(std::uint32_t ownerId)
+{
+    for (auto iter = groundDrops.begin(); iter != groundDrops.end(); )
+    {
+        if (iter->second.ownerId == ownerId)
+        {
+            iter = groundDrops.erase(iter);
+        }
+        else
+        {
+            ++iter;
+        }
+    }
+}

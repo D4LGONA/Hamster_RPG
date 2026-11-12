@@ -911,7 +911,7 @@ public class NetworkClient : MonoBehaviour
         remotePlayers.Clear();
         monsters.Clear();
         houses.Clear();
-        groundItems.Clear();   // 집에 들어가면 바닥 아이템 그림은 사라지지만 서버엔 남아 있어 1분 안에 돌아와 걸으면 주워진다
+        groundItems.Clear();   // 집에 들어가면 서버도 내 바닥 드랍을 지운다(GameServer::ClearDropsOf)
         pendingSpawns.Clear();
         pendingMoves.Clear();
     }
