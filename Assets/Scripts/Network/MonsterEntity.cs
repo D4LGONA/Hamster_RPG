@@ -44,6 +44,7 @@ public class MonsterEntity : MonoBehaviour
     private float deathElapsed;
 
     public bool IsDead() { return isDead; }
+    public string Kind { get; private set; } = "";   // "Caterpillar" / "Ladybug" / "CatBoss" (미니맵 점 색)
     public int GetHp() { return hp; }
     public int GetMaxHp() { return maxHp; }
 
@@ -67,6 +68,8 @@ public class MonsterEntity : MonoBehaviour
     // NetworkClient가 스폰 직후 부른다. kind = 서버 GameServer_View.cpp 의 이름("Caterpillar" 등)
     public void SetKind(string kind)
     {
+        Kind = kind ?? "";
+
         string sheet = null;
         switch (kind)
         {

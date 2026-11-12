@@ -134,6 +134,13 @@ public class NetworkClient : MonoBehaviour
     // 매 프레임 문자열을 새로 만들지 않아도 된다.
     public int GetStatVersion() { return statVersion; }
 
+    // 2026-11-12: HUD/미니맵용. 읽기만 한다(추가/삭제는 패킷 처리 쪽에서만).
+    public GameObject GetLocalPlayerObject() { return localPlayerObject; }
+    public uint GetCurrentZoneId() { return currentZoneId; }
+    public IReadOnlyDictionary<uint, MonsterEntity> GetMonsters() { return monsters; }
+    public IReadOnlyDictionary<uint, RemotePlayer> GetRemotePlayers() { return remotePlayers; }
+    public IReadOnlyDictionary<uint, HouseEntity> GetHouses() { return houses; }
+
     public void ConnectToServer(string inputName)
     {
         if (isConnected)
