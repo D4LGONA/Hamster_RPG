@@ -109,3 +109,6 @@ InitTestScene*.unity*
 /Server/Server/x64
 /Server/Server/x64
 /Server/Server/x64
+
+# DB 비밀번호가 들어 있는 서버 설정 (예시는 Server/db_config.example.txt)
+Server/db_config.txt

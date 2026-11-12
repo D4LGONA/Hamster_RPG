@@ -21,6 +21,14 @@ void GameServer::GameTickThread()
 
         UpdateWorld(dt);
 
+        // 자동 저장. 스냅샷만 떠서 DB 스레드에 넘기므로 틱은 거의 안 멈춘다.
+        autosaveTimer += dt;
+        if (autosaveTimer >= AUTOSAVE_INTERVAL_SEC)
+        {
+            autosaveTimer = 0.0f;
+            SaveAllPlayers("autosave");
+        }
+
         if (profileEnabled && clock::now() >= nextReport)
         {
             ReportTickProfile();

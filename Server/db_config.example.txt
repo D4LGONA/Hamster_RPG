@@ -1,0 +1,9 @@
+# DB 연결 설정 예시. 이 파일을 복사해서 db_config.txt 로 이름을 바꾸고 PWD를 자기 비밀번호로 고친다.
+# db_config.txt 는 .gitignore에 들어 있어서 깃허브에 올라가지 않는다(비밀번호 보호).
+# 파일이 없거나 연결에 실패하면 서버는 DB 없이 돈다(캐릭터가 저장되지 않을 뿐).
+#
+# DRIVER 이름은 "ODBC 데이터 원본(64비트)" 앱의 [드라이버] 탭에 보이는 이름 그대로 쓴다.
+# MySQL Connector/ODBC 9.x를 깔았으면 "MySQL ODBC 9.x Unicode Driver" 처럼 숫자가 다를 수 있다.
+#
+# '#'으로 시작하지 않는 첫 줄만 읽는다.
+DRIVER={MySQL ODBC 8.0 Unicode Driver};SERVER=127.0.0.1;PORT=3306;DATABASE=hamster_rpg;UID=root;PWD=여기에_비밀번호;OPTION=3;

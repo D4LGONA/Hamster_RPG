@@ -57,6 +57,10 @@ public:
     void SetPosition(float newX, float newY) { x = newX; y = newY; }
     void SetName(const std::string& newName) { name = newName; }
 
+    // DB에서 제대로 불러온 캐릭터만 저장한다. 불러오기에 실패했는데 기본값으로 저장하면 진짜 기록을 덮어쓴다.
+    bool IsPersistent() const { return persistent; }
+    void SetPersistent(bool value) { persistent = value; }
+
 private:
     std::uint32_t id = 0;
     std::string name;
@@ -67,6 +71,7 @@ private:
     bool loggedIn = false;
 
     PlayerStats stats;
+    bool persistent = false;
 
     std::unordered_set<std::uint32_t> viewList;
 

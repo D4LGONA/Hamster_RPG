@@ -93,6 +93,7 @@ Server/
   House.h           집 엔티티 · 소유자 · 관전자 목록
   SectorGrid.h      섹터 격자 (AOI) · 해시맵이라 월드 크기와 무관
   WorldGen.h        월드 생성 공식 (클라 WorldGen.cs 와 1:1)
+  Database.h/.cpp   MySQL(ODBC) 연결 · DB 전용 스레드 · 캐릭터 불러오기/저장
   GameServer_Chunk.cpp  청크 켜기/끄기 · 청크 몬스터 생성/정리
   protocol.h        패킷 정의 (클라 Protocol.cs 와 1:1)
 
@@ -147,6 +148,38 @@ Docs/
 표준 난수(`std::mt19937`, `System.Random`)는 언어마다 결과가 달라서 쓰지 않고, 정수 해시와 정수 거리 계산만 씁니다.
 
 나무·덤불·돌 위에는 집을 지을 수 없습니다(reason 4).
+
+---
+
+## DB (캐릭터 저장)
+
+레벨 · 경험치 · 골드 · HP · 위치를 MySQL에 저장합니다. 접속을 끊었다 들어와도 그대로 이어집니다.
+
+```text
+ IOCP 워커 ──(불러오기 요청)──▶ ┌──────────────┐ ──▶ MySQL
+ 게임 틱  ──(30초 자동 저장)──▶ │ DB 전용 스레드 │      sp_character_load
+ 접속 종료 ──(로그아웃 저장)──▶ └──────────────┘      sp_character_save
+                                      │
+                                      └─▶ CompleteLogin: 불러온 값으로 월드에 입장
+```
+
+- **DB 전용 스레드 + 작업 큐**: 쿼리는 수 ms라서 게임 틱(66ms)이나 IOCP 워커가 기다리면 이동이 멈춥니다. 다른 스레드는 큐에 넣기만 하고 바로 돌아갑니다.
+- **저장 프로시저만 호출**: 서버에 SQL 문장이 없습니다. 나중에 C# 서버도 같은 프로시저를 부르면 두 서버의 차이는 서버 구조에만 남습니다.
+- **원본 값만 저장**: maxHp · 공격력 · 필요 경험치는 레벨로 계산하므로 DB에 두지 않습니다.
+- **자동 저장은 트랜잭션 하나**: 접속자 전원을 30초마다 한 번에 저장합니다(800명 기준 약 70ms, DB 스레드에서).
+- **불러오는 중 접속이 끊기면** 월드에 넣지 않습니다(`pendingLogins`). 불러오기에 실패한 캐릭터는 저장하지 않아 기존 기록을 덮지 않습니다.
+- **같은 이름 동시 접속은 거절**합니다. 둘 다 받으면 나중 저장이 앞의 것을 덮습니다.
+- **연결이 끊기면 한 번 다시 붙고** 재시도합니다(MySQL `wait_timeout`).
+- 콘솔 창을 닫거나 Ctrl+C로 끄면 접속자 전원을 저장하고 꺼집니다.
+
+**처음 설정** (Windows)
+
+1. MySQL Server 8 과 **MySQL Connector/ODBC**(64비트)를 설치합니다.
+2. MySQL Workbench에서 `Server/sql/01_schema.sql` → `02_character.sql` 순서로 실행합니다.
+3. `Server/db_config.example.txt` 를 복사해 `Server/db_config.txt` 로 만들고 비밀번호를 적습니다(깃에는 안 올라갑니다).
+4. 서버를 켜면 콘솔에 `[DB] connected.` 가 뜹니다. 설정이 없거나 연결이 안 되면 **DB 없이** 예전처럼 돕니다.
+
+코드: `Server/Database.h/.cpp` (ODBC 연결 · DB 스레드), `GameServer_Packet.cpp` (`ProcessLogin` → `CompleteLogin`)
 
 ---
 

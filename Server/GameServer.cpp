@@ -29,6 +29,9 @@ void GameServer::Run()
 
     PostAccept();
 
+    // DB 1단계: 캐릭터 저장. 설정 파일이 없거나 연결이 안 되면 DB 없이 돈다(저장만 안 될 뿐).
+    dbWorker.Start(LoadDbConnectionString());
+
     // 몬스터는 미리 깔지 않는다. 플레이어가 다가가는 청크마다 게임 틱이 만든다(GameServer_Chunk.cpp).
 
     // 서버 권위 이동: 게임 틱 루프 스레드. 위치 계산/시야 갱신은 오직 이 스레드에서만 한다.
@@ -49,6 +52,19 @@ void GameServer::Run()
 
     running = false;
     tickThread.join();
+
+    ShutdownSave();
+}
+
+void GameServer::ShutdownSave()
+{
+    if (dbWorker.IsEnabled() == false)
+    {
+        return;
+    }
+
+    SaveAllPlayers("shutdown");
+    dbWorker.Stop();   // 큐에 남은 저장을 다 처리하고 끝난다
 }
 
 bool GameServer::Initialize()
@@ -301,15 +317,27 @@ void GameServer::DisconnectPlayer(std::uint32_t playerId)
 {
     bool existed = false;
     std::vector<std::uint32_t> viewers;   // 나를 시야에 두고 있던 사람들
+    bool needSave = false;
+    CharacterData saveData;
 
     {
         std::lock_guard<std::mutex> lock(playersLock);
+
+        // DB에서 불러오는 중에 끊겼다. CompleteLogin이 이걸 보고 월드에 넣지 않는다.
+        pendingLogins.erase(playerId);
 
         auto iter = players.find(playerId);
 
         if (iter != players.end())
         {
             Player& me = iter->second;
+
+            // 지우기 전에 저장할 값을 떠 둔다. 실제 저장은 DB 스레드가 한다(락 밖에서 Post).
+            if (me.IsPersistent())
+            {
+                saveData = MakeSaveData(me);
+                needSave = true;
+            }
 
             // 섹터 격자에서 제거
             sectorGrid.Remove(playerId, me.GetX(), me.GetY());
@@ -370,6 +398,19 @@ void GameServer::DisconnectPlayer(std::uint32_t playerId)
             // existed는 건드리지 않는다. 한 사람에게 두 번 불려도 로그가 한 번만 찍히게.
             iter->second->Close();
         }
+    }
+
+    if (needSave && dbWorker.IsEnabled())
+    {
+        dbWorker.Post([saveData](Database& db)
+        {
+            std::vector<CharacterData> one{ saveData };
+
+            if (db.SaveCharacters(one) == false)
+            {
+                std::cout << "[DB] logout save failed for " << saveData.name << ": " << db.GetLastError() << std::endl;
+            }
+        });
     }
 
     if (existed == false)

@@ -446,7 +446,8 @@ public class NetworkClient : MonoBehaviour
         {
             if (success == 0)
             {
-                Debug.LogError("[NETWORK] Login failed");
+                // 서버가 거절하는 경우: 같은 이름이 이미 접속 중(DB 사용 시) 또는 빈 이름
+                Debug.LogError("[NETWORK] Login failed (같은 이름이 이미 접속 중이거나 이름이 비어 있습니다)");
                 return;
             }
 

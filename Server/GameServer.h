@@ -12,6 +12,7 @@
 #include "House.h"
 #include "SectorGrid.h"
 #include "WorldGen.h"
+#include "Database.h"
 
 enum class PACKET_CHECK
 {
@@ -47,6 +48,18 @@ private:
     PACKET_CHECK ReadPacketInfo(const char* data, int bytes, std::uint16_t& packetSize, PACKET_TYPE& packetType);
 
     void ProcessLogin(std::uint32_t playerId, const CS_LOGIN_PACKET* packet);
+
+    // 2026-11-12: DB 1단계. 로그인은 두 단계다.
+    //   ProcessLogin(워커 스레드) -> DB 스레드에 불러오기 요청 -> CompleteLogin(DB 스레드)에서 월드에 넣는다.
+    // DB가 없으면 ProcessLogin이 바로 CompleteLogin을 부른다(saved == nullptr, 예전과 같은 동작).
+    void CompleteLogin(std::uint32_t playerId, const std::string& playerName, const CharacterData* saved, bool fromDb);
+    void SendLoginFail(std::uint32_t playerId);
+    CharacterData MakeSaveData(const Player& player);   // playersLock을 잡은 상태에서
+    void SaveAllPlayers(const char* reason);
+public:
+    // 종료 직전 저장. 남은 DB 작업을 다 끝낼 때까지 기다린다(main.cpp 콘솔 종료 핸들러).
+    void ShutdownSave();
+private:
     void ProcessInput(std::uint32_t playerId, const CS_INPUT_PACKET* packet);
     void ProcessChat(std::uint32_t playerId, const CS_CHAT_PACKET* packet);
     void ProcessAttack(std::uint32_t playerId, const CS_ATTACK_PACKET* packet);
@@ -272,6 +285,13 @@ private:
 
     // 섹터 격자도 playersLock으로 함께 보호한다(위치/뷰리스트와 항상 같이 바뀌므로). 몬스터도 여기 들어간다.
     SectorGrid sectorGrid;
+
+    DbWorker dbWorker;
+    // DB에서 캐릭터를 불러오는 중인 playerId. 그 사이에 끊기면 여기서 빠지고, CompleteLogin이 이걸 보고 버린다.
+    // playersLock으로 보호.
+    std::unordered_set<std::uint32_t> pendingLogins;
+    float autosaveTimer = 0.0f;
+    static constexpr float AUTOSAVE_INTERVAL_SEC = 30.0f;   // 서버가 갑자기 꺼져도 최대 30초만 잃는다
 
     // 켜진 청크. key = (chunkY << 32) | chunkX. playersLock으로 보호.
     struct ChunkState

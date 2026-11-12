@@ -119,6 +119,84 @@ void GameServer::ProcessLogin(std::uint32_t playerId, const CS_LOGIN_PACKET* pac
 {
     std::string playerName(packet->name, strnlen_s(packet->name, NAME_SIZE));
 
+    if (playerName.empty())
+    {
+        SendLoginFail(playerId);
+        return;
+    }
+
+    bool duplicateName = false;
+
+    {
+        std::lock_guard<std::mutex> lock(playersLock);
+
+        if (players.find(playerId) != players.end() || pendingLogins.count(playerId) != 0)
+        {
+            return;   // 로그인 패킷을 두 번 보냈다
+        }
+
+        // 같은 이름이 이미 접속해 있으면 거절한다. 둘 다 받으면 같은 캐릭터를 둘이 저장해서 나중 것이 덮어쓴다.
+        // (DB가 없을 때는 저장이 없으니 예전처럼 허용한다. 부하 테스트 봇도 이름이 겹치지 않는다)
+        if (dbWorker.IsEnabled())
+        {
+            for (const auto& [otherId, other] : players)
+            {
+                if (other.GetName() == playerName)
+                {
+                    duplicateName = true;
+                    break;
+                }
+            }
+
+            if (duplicateName == false)
+            {
+                pendingLogins.insert(playerId);
+            }
+        }
+    }
+
+    if (duplicateName)
+    {
+        std::cout << "[LOGIN] reject duplicate name: " << playerName << std::endl;
+        SendLoginFail(playerId);
+        return;
+    }
+
+    if (dbWorker.IsEnabled() == false)
+    {
+        CompleteLogin(playerId, playerName, nullptr, false);
+        return;
+    }
+
+    // DB 스레드에서 불러오고, 끝나면 그 스레드에서 CompleteLogin. 워커 스레드는 여기서 바로 돌아간다.
+    dbWorker.Post([this, playerId, playerName](Database& db)
+    {
+        CharacterData data;
+
+        if (db.LoadCharacter(playerName, data))
+        {
+            CompleteLogin(playerId, playerName, &data, true);
+        }
+        else
+        {
+            // 불러오지 못했으면 기본값으로 들여보내되 저장은 하지 않는다(진짜 기록을 덮지 않게).
+            std::cout << "[DB] load failed for " << playerName << ": " << db.GetLastError() << std::endl;
+            CompleteLogin(playerId, playerName, nullptr, true);
+        }
+    });
+}
+
+void GameServer::SendLoginFail(std::uint32_t playerId)
+{
+    SC_LOGIN_RESULT_PACKET fail{};
+    fail.size = sizeof(SC_LOGIN_RESULT_PACKET);
+    fail.type = PACKET_TYPE::SC_LOGIN_RESULT;
+    fail.success = 0;
+    SendPacket(playerId, &fail, fail.size);
+}
+
+void GameServer::CompleteLogin(std::uint32_t playerId, const std::string& playerName, const CharacterData* saved, bool fromDb)
+{
     PlayerStats selfStats;
     SC_LOGIN_RESULT_PACKET loginResult{};
 
@@ -129,6 +207,15 @@ void GameServer::ProcessLogin(std::uint32_t playerId, const CS_LOGIN_PACKET* pac
     {
         std::lock_guard<std::mutex> lock(playersLock);
 
+        if (fromDb)
+        {
+            // 불러오는 동안 접속이 끊겼으면 DisconnectPlayer가 이미 지웠다. 유령을 만들지 않는다.
+            if (pendingLogins.erase(playerId) == 0)
+            {
+                return;
+            }
+        }
+
         if (players.find(playerId) != players.end())
         {
             return;
@@ -136,10 +223,31 @@ void GameServer::ProcessLogin(std::uint32_t playerId, const CS_LOGIN_PACKET* pac
 
         float spawnX = 0.0f;
         float spawnY = 0.0f;
-        PickSpawnPosition(spawnX, spawnY);
+
+        // 저장된 자리에서 시작한다. 부하 테스트(--random-spawn)는 분포를 유지하려고 저장 위치를 무시한다.
+        if (saved != nullptr && saved->isNew == false && randomSpawnExtent <= 0.0f &&
+            std::isfinite(saved->x) && std::isfinite(saved->y) &&
+            saved->x > WORLD_MIN && saved->x < WORLD_MAX && saved->y > WORLD_MIN && saved->y < WORLD_MAX)
+        {
+            spawnX = saved->x;
+            spawnY = saved->y;
+        }
+        else
+        {
+            PickSpawnPosition(spawnX, spawnY);
+        }
 
         Player player{ playerId, playerName, spawnX, spawnY };
-        player.RecalculateStats();
+
+        if (saved != nullptr)
+        {
+            player.GetStats().LoadSaved(saved->level, saved->exp, saved->gold, saved->hp);
+            player.SetPersistent(true);
+        }
+        else
+        {
+            player.RecalculateStats();
+        }
 
         auto result = players.emplace(playerId, std::move(player));
 
@@ -179,7 +287,90 @@ void GameServer::ProcessLogin(std::uint32_t playerId, const CS_LOGIN_PACKET* pac
 
     std::cout << "[LOGIN] id = " << loginResult.id
         << ", name = " << playerName
+        << ", level = " << selfStats.level
+        << (saved == nullptr ? "" : (saved->isNew ? " (new)" : " (loaded)"))
         << ", view = " << viewCount << std::endl;
+}
+
+// 저장할 값. 집 안에 있으면 집 안 좌표 대신 집 문 옆(나왔을 때 서는 자리)을 저장한다.
+// 다음 접속은 항상 월드에서 시작하기 때문이다.
+CharacterData GameServer::MakeSaveData(const Player& player)
+{
+    const PlayerStats& stats = player.GetStats();
+
+    CharacterData data;
+    data.name = player.GetName();
+    data.level = stats.level;
+    data.exp = stats.exp;
+    data.gold = stats.gold;
+    data.hp = stats.hp;
+    data.x = player.GetX();
+    data.y = player.GetY();
+    data.isNew = false;
+
+    if (player.GetZoneId() != 0)
+    {
+        auto houseIter = houses.find(player.GetZoneId());
+
+        if (houseIter != houses.end())
+        {
+            data.x = houseIter->second.GetX() + HOUSE_EXIT_SIDE_OFFSET;
+            data.y = houseIter->second.GetY() - HOUSE_EXIT_OFFSET;
+        }
+        else
+        {
+            data.x = 0.0f;
+            data.y = 0.0f;
+        }
+    }
+
+    return data;
+}
+
+// 접속 중인 캐릭터 전부를 DB 스레드에 맡긴다(트랜잭션 하나). 게임 틱은 기다리지 않는다.
+void GameServer::SaveAllPlayers(const char* reason)
+{
+    if (dbWorker.IsEnabled() == false)
+    {
+        return;
+    }
+
+    std::vector<CharacterData> batch;
+
+    {
+        std::lock_guard<std::mutex> lock(playersLock);
+        batch.reserve(players.size());
+
+        for (const auto& [id, player] : players)
+        {
+            if (player.IsPersistent())
+            {
+                batch.push_back(MakeSaveData(player));
+            }
+        }
+    }
+
+    if (batch.empty())
+    {
+        return;
+    }
+
+    std::string why = reason;
+    dbWorker.Post([batch = std::move(batch), why](Database& db)
+    {
+        auto begin = std::chrono::steady_clock::now();
+        bool ok = db.SaveCharacters(batch);
+        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - begin).count();
+
+        if (ok)
+        {
+            std::cout << "[DB] saved " << batch.size() << " characters (" << why << ", " << ms << "ms)" << std::endl;
+        }
+        else
+        {
+            std::cout << "[DB] save failed (" << why << "): " << db.GetLastError() << std::endl;
+        }
+    });
 }
 
 // 서버 권위 이동: 클라의 입력 방향만 저장한다. 실제 위치 계산은 게임 틱(UpdateWorld)에서.

@@ -137,6 +137,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="WorldGen.h" />
+    <ClInclude Include="Database.h" />
     <ClInclude Include="GameServer.h" />
     <ClInclude Include="Monster.h" />
     <ClInclude Include="NetworkTypes.h" />
@@ -148,6 +149,7 @@
     <ClInclude Include="stdafx.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="Database.cpp" />
     <ClCompile Include="GameServer.cpp" />
     <ClCompile Include="GameServer_Packet.cpp" />
     <ClCompile Include="GameServer_View.cpp" />

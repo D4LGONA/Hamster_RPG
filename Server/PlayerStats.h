@@ -47,6 +47,17 @@ struct PlayerStats
         return leveledUp;
     }
 
+    // 2026-11-12: DB에서 불러온 원본 값을 넣는다. 나머지(maxHp, attack, requiredExp ...)는 레벨로 다시 계산.
+    void LoadSaved(int savedLevel, int savedExp, int savedGold, int savedHp)
+    {
+        level = savedLevel < 1 ? 1 : savedLevel;
+        exp = savedExp < 0 ? 0 : savedExp;
+        gold = savedGold < 0 ? 0 : savedGold;
+        hp = savedHp;
+        requiredExp = 100 + (level - 1) * 50;   // AddExp의 레벨업 공식과 같아야 한다
+        Recalculate();                          // hp가 0 이하면 여기서 가득 채운다
+    }
+
     void Recalculate()
     {
         maxHp = 100 + (level - 1) * 20;
