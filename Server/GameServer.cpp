@@ -32,6 +32,9 @@ void GameServer::Run()
     // DB 1단계: 캐릭터 저장. 설정 파일이 없거나 연결이 안 되면 DB 없이 돈다(저장만 안 될 뿐).
     dbWorker.Start(LoadDbConnectionString());
 
+    // 2026-11-13: 지어 둔 집과 가구를 DB에서 불러온다(서버를 껐다 켜도 그대로)
+    LoadWorldFromDb();
+
     // 몬스터는 미리 깔지 않는다. 플레이어가 다가가는 청크마다 게임 틱이 만든다(GameServer_Chunk.cpp).
 
     // 서버 권위 이동: 게임 틱 루프 스레드. 위치 계산/시야 갱신은 오직 이 스레드에서만 한다.

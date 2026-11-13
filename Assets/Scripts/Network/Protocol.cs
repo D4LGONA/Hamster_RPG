@@ -72,7 +72,16 @@ public static class Protocol
 
         // 2026-11-13: 무기 강화
         CS_ENHANCE = 23,
-        SC_ENHANCE_RESULT = 24
+        SC_ENHANCE_RESULT = 24,
+
+        // 2026-11-13: 가구
+        CS_FURNITURE_PLACE = 25,
+        CS_FURNITURE_REMOVE = 26,
+        CS_FURNITURE_MOVE = 27,
+        SC_FURNITURE_SPAWN = 28,
+        SC_FURNITURE_MOVED = 29,
+        SC_FURNITURE_REMOVED = 30,
+        SC_FURNITURE_RESULT = 31
     }
     public struct PlayerStatsData
     {
@@ -190,6 +199,47 @@ public static class Protocol
         return packet;
     }
 
+    // 가구 설치: 종류(1) 회전(1) x(4) y(4)
+    public static byte[] MakeFurniturePlacePacket(int itemType, int rotation, float x, float y)
+    {
+        byte[] packet = new byte[HeaderSize + 1 + 1 + 4 + 4];
+
+        int offset = 0;
+        WriteHeader(packet, ref offset, PacketType.CS_FURNITURE_PLACE);
+        packet[offset++] = (byte)itemType;
+        packet[offset++] = (byte)rotation;
+        WriteFloat(packet, ref offset, x);
+        WriteFloat(packet, ref offset, y);
+
+        return packet;
+    }
+
+    // 가구 옮기기: id(4) 회전(1) x(4) y(4)
+    public static byte[] MakeFurnitureMovePacket(uint furnitureId, int rotation, float x, float y)
+    {
+        byte[] packet = new byte[HeaderSize + 4 + 1 + 4 + 4];
+
+        int offset = 0;
+        WriteHeader(packet, ref offset, PacketType.CS_FURNITURE_MOVE);
+        WriteUInt(packet, ref offset, furnitureId);
+        packet[offset++] = (byte)rotation;
+        WriteFloat(packet, ref offset, x);
+        WriteFloat(packet, ref offset, y);
+
+        return packet;
+    }
+
+    public static byte[] MakeFurnitureRemovePacket(uint furnitureId)
+    {
+        byte[] packet = new byte[HeaderSize + 4];
+
+        int offset = 0;
+        WriteHeader(packet, ref offset, PacketType.CS_FURNITURE_REMOVE);
+        WriteUInt(packet, ref offset, furnitureId);
+
+        return packet;
+    }
+
     public static byte[] MakeLogoutPacket()
     {
         byte[] packet = new byte[HeaderSize];
@@ -278,6 +328,13 @@ public static class Protocol
     }
 
     private static void WriteUShort(byte[] buffer, ref int offset, ushort value)
+    {
+        byte[] bytes = BitConverter.GetBytes(value);
+        Buffer.BlockCopy(bytes, 0, buffer, offset, bytes.Length);
+        offset += bytes.Length;
+    }
+
+    private static void WriteUInt(byte[] buffer, ref int offset, uint value)
     {
         byte[] bytes = BitConverter.GetBytes(value);
         Buffer.BlockCopy(bytes, 0, buffer, offset, bytes.Length);

@@ -26,6 +26,12 @@ public class PlayerAttackInput : MonoBehaviour
             return;
         }
 
+        // 2026-11-13: 집 꾸미기 모드에서는 클릭이 가구 놓기다
+        if (HouseBuildMode.IsActive)
+        {
+            return;
+        }
+
         if (ChatUI.Instance != null && ChatUI.Instance.IsChatting())
         {
             return;

@@ -70,6 +70,10 @@ public:
         stats.Recalculate();
     }
 
+    // 가구 요청 연타 방지용(마지막 요청 시각)
+    std::chrono::steady_clock::time_point GetLastFurnitureRequest() const { return lastFurnitureRequest; }
+    void SetLastFurnitureRequest(std::chrono::steady_clock::time_point t) { lastFurnitureRequest = t; }
+
     bool IsPersistent() const { return persistent; }
     void SetPersistent(bool value) { persistent = value; }
 
@@ -85,6 +89,7 @@ private:
     PlayerStats stats;
     Inventory inventory;
     bool persistent = false;
+    std::chrono::steady_clock::time_point lastFurnitureRequest{};
 
     std::unordered_set<std::uint32_t> viewList;
 

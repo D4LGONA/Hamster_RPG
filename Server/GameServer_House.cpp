@@ -20,6 +20,11 @@ void GameServer::ProcessHouseAction(std::uint32_t playerId)
 
     bool sendResult = false;
     SC_HOUSE_RESULT_PACKET houseResult{};
+    std::vector<SC_FURNITURE_SPAWN_PACKET> furnitureSends;
+    bool houseCreated = false;
+    std::uint32_t createdHouseId = 0;
+    float createdX = 0.0f, createdY = 0.0f;
+    std::string createdOwner;
 
     {
         std::lock_guard<std::mutex> lock(playersLock);
@@ -53,6 +58,7 @@ void GameServer::ProcessHouseAction(std::uint32_t playerId)
                 std::uint32_t houseId = house->GetId();
 
                 EnterHouse(player, *house, spawnSends, despawnSends);
+                CollectHouseFurnitureSpawns(houseId, furnitureSends);   // 들어가자마자 이 집 가구 전부
 
                 sendZone = true;
                 zoneChange.zoneId = houseId;
@@ -71,6 +77,16 @@ void GameServer::ProcessHouseAction(std::uint32_t playerId)
 
                 if (placed)
                 {
+                    // DB에 남길 값(락 밖에서 Post)
+                    if (House* created = FindHouseByOwner(player.GetName()))
+                    {
+                        houseCreated = true;
+                        createdHouseId = created->GetId();
+                        createdX = created->GetX();
+                        createdY = created->GetY();
+                        createdOwner = created->GetOwnerName();
+                    }
+
                     // 집에 파묻히지 않게 밖으로 밀어냈으므로 새 위치를 알려준다.
                     SC_MOVE_PACKET movePacket{};
                     movePacket.size = sizeof(SC_MOVE_PACKET);
@@ -117,6 +133,25 @@ void GameServer::ProcessHouseAction(std::uint32_t playerId)
     for (auto& [targetId, spawn] : spawnSends)
     {
         SendPacket(targetId, &spawn, spawn.size);
+    }
+
+    // 존 변경 뒤에 가구 목록(클라가 집 씬을 띄운 뒤 받아 그린다)
+    for (SC_FURNITURE_SPAWN_PACKET& furniture : furnitureSends)
+    {
+        SendPacket(playerId, &furniture, furniture.size);
+    }
+
+    // 2026-11-13: 새 집을 DB에 남긴다(서버를 껐다 켜도 집이 그대로)
+    if (houseCreated && dbWorker.IsEnabled())
+    {
+        DbHouseRow row{ createdHouseId - HOUSE_ID_BASE, createdOwner, createdX, createdY };
+        dbWorker.Post([row](Database& db)
+        {
+            if (db.CreateHouse(row) == false)
+            {
+                std::cout << "[DB] house create failed: " << db.GetLastError() << std::endl;
+            }
+        });
     }
 
     for (auto& [targetId, move] : moveSends)

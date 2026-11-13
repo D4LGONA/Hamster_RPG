@@ -153,6 +153,101 @@ public class NetworkClient : MonoBehaviour
     // (결과 0 실패 / 1 성공 / 2 골드 부족 / 3 무기 없음 / 4 최대, 새 수치, 무기 공격력, 쓴 골드, 성공률)
     public event System.Action<int, int, int, int, int> OnEnhanceResult;
 
+    // ---------------- 2026-11-13: 가구 ----------------
+    // 가구는 데이터(furnitureData)만 들고 있고, 그리는 건 집 씬의 HouseFurnitureView가 이 데이터를 보고 맞춘다.
+    // 씬이 늦게 뜨거나 패킷이 먼저 와도 데이터는 남아 있으니 순서 문제가 없다.
+    public struct FurnitureData { public int itemType; public int rotation; public float x; public float y; }
+
+    private readonly Dictionary<uint, FurnitureData> furnitureData = new Dictionary<uint, FurnitureData>();
+    private int furnitureVersion;
+
+    public IReadOnlyDictionary<uint, FurnitureData> GetFurniture() { return furnitureData; }
+    public int GetFurnitureVersion() { return furnitureVersion; }
+    public event System.Action<int> OnFurnitureFailed;   // 실패 이유
+
+    public void SendFurniturePlace(int itemType, int rotation, Vector2 position)
+    {
+        if (isConnected && isLoggedIn && stream != null)
+        {
+            SendRaw(Protocol.MakeFurniturePlacePacket(itemType, rotation, position.x, position.y));
+        }
+    }
+
+    public void SendFurnitureMove(uint furnitureId, int rotation, Vector2 position)
+    {
+        if (isConnected && isLoggedIn && stream != null)
+        {
+            SendRaw(Protocol.MakeFurnitureMovePacket(furnitureId, rotation, position.x, position.y));
+        }
+    }
+
+    public void SendFurnitureRemove(uint furnitureId)
+    {
+        if (isConnected && isLoggedIn && stream != null)
+        {
+            SendRaw(Protocol.MakeFurnitureRemovePacket(furnitureId));
+        }
+    }
+
+    private void HandleFurnitureSpawn(byte[] packet)
+    {
+        int offset = Protocol.HeaderSize;
+        uint id = Protocol.ReadUInt(packet, ref offset);
+        int itemType = Protocol.ReadByte(packet, ref offset);
+        int rotation = Protocol.ReadByte(packet, ref offset);
+        float x = Protocol.ReadFloat(packet, ref offset);
+        float y = Protocol.ReadFloat(packet, ref offset);
+
+        mainThreadActions.Enqueue(() =>
+        {
+            furnitureData[id] = new FurnitureData { itemType = itemType, rotation = rotation, x = x, y = y };
+            furnitureVersion++;
+        });
+    }
+
+    private void HandleFurnitureMoved(byte[] packet)
+    {
+        int offset = Protocol.HeaderSize;
+        uint id = Protocol.ReadUInt(packet, ref offset);
+        int rotation = Protocol.ReadByte(packet, ref offset);
+        float x = Protocol.ReadFloat(packet, ref offset);
+        float y = Protocol.ReadFloat(packet, ref offset);
+
+        mainThreadActions.Enqueue(() =>
+        {
+            if (furnitureData.TryGetValue(id, out FurnitureData data))
+            {
+                data.rotation = rotation;
+                data.x = x;
+                data.y = y;
+                furnitureData[id] = data;
+                furnitureVersion++;
+            }
+        });
+    }
+
+    private void HandleFurnitureRemoved(byte[] packet)
+    {
+        int offset = Protocol.HeaderSize;
+        uint id = Protocol.ReadUInt(packet, ref offset);
+
+        mainThreadActions.Enqueue(() =>
+        {
+            if (furnitureData.Remove(id))
+            {
+                furnitureVersion++;
+            }
+        });
+    }
+
+    private void HandleFurnitureResult(byte[] packet)
+    {
+        int offset = Protocol.HeaderSize;
+        int reason = Protocol.ReadByte(packet, ref offset);
+
+        mainThreadActions.Enqueue(() => OnFurnitureFailed?.Invoke(reason));
+    }
+
     public void SendEnhance()
     {
         if (isConnected == false || isLoggedIn == false || stream == null)
@@ -594,6 +689,18 @@ public class NetworkClient : MonoBehaviour
             case Protocol.PacketType.SC_ENHANCE_RESULT:
                 HandleEnhanceResult(packet);
                 break;
+            case Protocol.PacketType.SC_FURNITURE_SPAWN:
+                HandleFurnitureSpawn(packet);
+                break;
+            case Protocol.PacketType.SC_FURNITURE_MOVED:
+                HandleFurnitureMoved(packet);
+                break;
+            case Protocol.PacketType.SC_FURNITURE_REMOVED:
+                HandleFurnitureRemoved(packet);
+                break;
+            case Protocol.PacketType.SC_FURNITURE_RESULT:
+                HandleFurnitureResult(packet);
+                break;
             default:
                 mainThreadActions.Enqueue(() => Debug.LogWarning("[NETWORK] Unknown packet type: " + packetType));
                 break;
@@ -940,6 +1047,8 @@ public class NetworkClient : MonoBehaviour
         monsters.Clear();
         houses.Clear();
         groundItems.Clear();   // 집에 들어가면 서버도 내 바닥 드랍을 지운다(GameServer::ClearDropsOf)
+        furnitureData.Clear(); // 존이 바뀌면 가구 목록도 새로 받는다(들어간 집의 목록이 곧 온다)
+        furnitureVersion++;
         pendingSpawns.Clear();
         pendingMoves.Clear();
     }

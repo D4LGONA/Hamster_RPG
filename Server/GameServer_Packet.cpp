@@ -76,6 +76,21 @@ int GameServer::ProcessPacket(std::uint32_t playerId, const char* data, int byte
                 ProcessHouseAction(playerId);
             break;
 
+        case PACKET_TYPE::CS_FURNITURE_PLACE:
+            if (packetSize == sizeof(CS_FURNITURE_PLACE_PACKET))
+                ProcessFurniturePlace(playerId, reinterpret_cast<const CS_FURNITURE_PLACE_PACKET*>(packetData));
+            break;
+
+        case PACKET_TYPE::CS_FURNITURE_REMOVE:
+            if (packetSize == sizeof(CS_FURNITURE_REMOVE_PACKET))
+                ProcessFurnitureRemove(playerId, reinterpret_cast<const CS_FURNITURE_REMOVE_PACKET*>(packetData));
+            break;
+
+        case PACKET_TYPE::CS_FURNITURE_MOVE:
+            if (packetSize == sizeof(CS_FURNITURE_MOVE_PACKET))
+                ProcessFurnitureMove(playerId, reinterpret_cast<const CS_FURNITURE_MOVE_PACKET*>(packetData));
+            break;
+
         case PACKET_TYPE::CS_ENHANCE:
             if (packetSize == sizeof(CS_ENHANCE_PACKET))
                 ProcessEnhance(playerId);

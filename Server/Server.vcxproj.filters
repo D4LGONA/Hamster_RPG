@@ -39,6 +39,9 @@
     <ClInclude Include="Item.h">
       <Filter>헤더 파일</Filter>
     </ClInclude>
+    <ClInclude Include="Furniture.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
     <ClInclude Include="GameServer.h">
       <Filter>헤더 파일</Filter>
     </ClInclude>
@@ -75,6 +78,9 @@
       <Filter>소스 파일</Filter>
     </ClCompile>
     <ClCompile Include="GameServer_Item.cpp">
+      <Filter>소스 파일</Filter>
+    </ClCompile>
+    <ClCompile Include="GameServer_Furniture.cpp">
       <Filter>소스 파일</Filter>
     </ClCompile>
     <ClCompile Include="GameServer_Monster.cpp">

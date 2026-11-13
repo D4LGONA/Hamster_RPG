@@ -40,6 +40,25 @@ struct CharacterData
     int equippedSlot = -1;   // 무기 장착 칸. -1이면 맨손
 };
 
+// 2026-11-13: 집 / 가구. id는 DB id(메모리 id - 대역). 서버가 정해서 넣는다(AUTO_INCREMENT 열이지만 값을 지정).
+struct DbHouseRow
+{
+    std::uint64_t houseId;
+    std::string ownerName;
+    float x;
+    float y;
+};
+
+struct DbFurnitureRow
+{
+    std::uint64_t furnitureId;
+    std::uint64_t houseId;
+    int itemType;
+    float x;
+    float y;
+    int rotation;
+};
+
 class Database
 {
 public:
@@ -59,9 +78,17 @@ public:
     // 여러 명을 트랜잭션 하나로 저장한다. 자동 저장 때 800명을 한 번에 넣어도 커밋은 한 번.
     bool SaveCharacters(const std::vector<CharacterData>& list);
 
+    // 2026-11-13: 집 / 가구
+    bool LoadWorld(std::vector<DbHouseRow>& housesOut, std::vector<DbFurnitureRow>& furnitureOut);
+    bool CreateHouse(const DbHouseRow& row);
+    bool SaveFurniture(const DbFurnitureRow& row);   // 없으면 넣고 있으면 고친다
+    bool DeleteFurniture(std::uint64_t furnitureId);
+
     const std::string& GetLastError() const { return lastError; }
 
 private:
+    bool TryLoadWorld(std::vector<DbHouseRow>& housesOut, std::vector<DbFurnitureRow>& furnitureOut);
+    bool ExecCall(const char* sql, const std::function<bool(void* stmt)>& bind);
     bool TryLoad(const std::string& name, CharacterData& out);
     bool TrySave(const std::vector<CharacterData>& list);
     bool ReconnectIfDead();
@@ -86,6 +113,8 @@ public:
 
     bool IsEnabled() const { return enabled; }
     void Post(Job job);
+    // 작업 하나를 DB 스레드에서 돌리고 끝날 때까지 기다린다. 서버 시작 때 집/가구 불러오기용(게임 중엔 쓰지 않는다).
+    void RunSync(Job job);
     std::size_t GetQueueSize();
 
 private:

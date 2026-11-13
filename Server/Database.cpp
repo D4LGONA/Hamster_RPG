@@ -69,6 +69,29 @@ namespace
         return out;
     }
 
+    std::string Utf16ToUtf8(const char16_t* text, std::size_t length)
+    {
+        std::string out;
+
+        for (std::size_t i = 0; i < length; ++i)
+        {
+            std::uint32_t cp = text[i];
+
+            if (cp >= 0xD800 && cp <= 0xDBFF && i + 1 < length)
+            {
+                cp = 0x10000 + ((cp - 0xD800) << 10) + (text[i + 1] - 0xDC00);
+                ++i;
+            }
+
+            if (cp < 0x80) { out.push_back(static_cast<char>(cp)); }
+            else if (cp < 0x800) { out.push_back(static_cast<char>(0xC0 | (cp >> 6))); out.push_back(static_cast<char>(0x80 | (cp & 0x3F))); }
+            else if (cp < 0x10000) { out.push_back(static_cast<char>(0xE0 | (cp >> 12))); out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F))); out.push_back(static_cast<char>(0x80 | (cp & 0x3F))); }
+            else { out.push_back(static_cast<char>(0xF0 | (cp >> 18))); out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F))); out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F))); out.push_back(static_cast<char>(0x80 | (cp & 0x3F))); }
+        }
+
+        return out;
+    }
+
     // 프로시저 CALL은 결과 집합 뒤에 상태 결과가 하나 더 온다. 다 비워야 다음 문장을 실행할 수 있다.
     void DrainResults(SQLHSTMT stmt)
     {
@@ -408,6 +431,185 @@ void Database::RecordError(short handleType, void* handle, const char* where)
     }
 }
 
+// ---------------------------------------------------------------- 집 / 가구 (2026-11-13)
+
+// 결과 없는 프로시저 하나 실행. bind가 파라미터를 묶는다. 실패하면 한 번 다시 붙어서 재시도.
+bool Database::ExecCall(const char* sql, const std::function<bool(void* stmt)>& bind)
+{
+    for (int attempt = 0; attempt < 2; ++attempt)
+    {
+        if (dbc == nullptr)
+        {
+            return false;
+        }
+
+        SQLHSTMT stmt = SQL_NULL_HSTMT;
+
+        if (Ok(SQLAllocHandle(SQL_HANDLE_STMT, static_cast<SQLHDBC>(dbc), &stmt)) == false)
+        {
+            RecordError(SQL_HANDLE_DBC, dbc, "exec alloc");
+            return false;
+        }
+
+        bool ok = Ok(ODBC_PREPARE(stmt, reinterpret_cast<SQLCHAR*>(const_cast<char*>(sql)), SQL_NTS)) &&
+                  bind(stmt) &&
+                  Ok(SQLExecute(stmt));
+
+        if (ok == false)
+        {
+            RecordError(SQL_HANDLE_STMT, stmt, sql);
+        }
+
+        DrainResults(stmt);
+        SQLFreeHandle(SQL_HANDLE_STMT, stmt);
+
+        if (ok)
+        {
+            return true;
+        }
+
+        if (attempt == 0 && ReconnectIfDead() == false)
+        {
+            return false;
+        }
+    }
+
+    return false;
+}
+
+bool Database::CreateHouse(const DbHouseRow& row)
+{
+    std::u16string wideName = Utf8ToUtf16(row.ownerName);
+    SQLLEN nameBytes = static_cast<SQLLEN>(wideName.size() * sizeof(char16_t));
+    SQLBIGINT id = static_cast<SQLBIGINT>(row.houseId);
+    SQLREAL x = row.x, y = row.y;
+
+    return ExecCall("{CALL sp_house_create(?, ?, ?, ?)}", [&](void* h)
+    {
+        SQLHSTMT stmt = static_cast<SQLHSTMT>(h);
+        return Ok(SQLBindParameter(stmt, 1, SQL_PARAM_INPUT, SQL_C_SBIGINT, SQL_BIGINT, 0, 0, &id, 0, nullptr)) &&
+               Ok(SQLBindParameter(stmt, 2, SQL_PARAM_INPUT, SQL_C_WCHAR, SQL_WVARCHAR, 20, 0, const_cast<char16_t*>(wideName.c_str()), nameBytes, &nameBytes)) &&
+               Ok(SQLBindParameter(stmt, 3, SQL_PARAM_INPUT, SQL_C_FLOAT, SQL_REAL, 0, 0, &x, 0, nullptr)) &&
+               Ok(SQLBindParameter(stmt, 4, SQL_PARAM_INPUT, SQL_C_FLOAT, SQL_REAL, 0, 0, &y, 0, nullptr));
+    });
+}
+
+bool Database::SaveFurniture(const DbFurnitureRow& row)
+{
+    SQLBIGINT id = static_cast<SQLBIGINT>(row.furnitureId);
+    SQLBIGINT houseId = static_cast<SQLBIGINT>(row.houseId);
+    SQLINTEGER itemType = row.itemType, rotation = row.rotation;
+    SQLREAL x = row.x, y = row.y;
+
+    return ExecCall("{CALL sp_furniture_save(?, ?, ?, ?, ?, ?)}", [&](void* h)
+    {
+        SQLHSTMT stmt = static_cast<SQLHSTMT>(h);
+        return Ok(SQLBindParameter(stmt, 1, SQL_PARAM_INPUT, SQL_C_SBIGINT, SQL_BIGINT, 0, 0, &id, 0, nullptr)) &&
+               Ok(SQLBindParameter(stmt, 2, SQL_PARAM_INPUT, SQL_C_SBIGINT, SQL_BIGINT, 0, 0, &houseId, 0, nullptr)) &&
+               Ok(SQLBindParameter(stmt, 3, SQL_PARAM_INPUT, SQL_C_SLONG, SQL_INTEGER, 0, 0, &itemType, 0, nullptr)) &&
+               Ok(SQLBindParameter(stmt, 4, SQL_PARAM_INPUT, SQL_C_FLOAT, SQL_REAL, 0, 0, &x, 0, nullptr)) &&
+               Ok(SQLBindParameter(stmt, 5, SQL_PARAM_INPUT, SQL_C_FLOAT, SQL_REAL, 0, 0, &y, 0, nullptr)) &&
+               Ok(SQLBindParameter(stmt, 6, SQL_PARAM_INPUT, SQL_C_SLONG, SQL_INTEGER, 0, 0, &rotation, 0, nullptr));
+    });
+}
+
+bool Database::DeleteFurniture(std::uint64_t furnitureId)
+{
+    SQLBIGINT id = static_cast<SQLBIGINT>(furnitureId);
+
+    return ExecCall("{CALL sp_furniture_delete(?)}", [&](void* h)
+    {
+        return Ok(SQLBindParameter(static_cast<SQLHSTMT>(h), 1, SQL_PARAM_INPUT, SQL_C_SBIGINT, SQL_BIGINT, 0, 0, &id, 0, nullptr));
+    });
+}
+
+bool Database::LoadWorld(std::vector<DbHouseRow>& housesOut, std::vector<DbFurnitureRow>& furnitureOut)
+{
+    if (dbc == nullptr)
+    {
+        return false;
+    }
+
+    if (TryLoadWorld(housesOut, furnitureOut))
+    {
+        return true;
+    }
+
+    housesOut.clear();
+    furnitureOut.clear();
+    return ReconnectIfDead() && TryLoadWorld(housesOut, furnitureOut);
+}
+
+// sp_world_load: 결과 1 = 집 전부, 결과 2 = 가구 전부
+bool Database::TryLoadWorld(std::vector<DbHouseRow>& housesOut, std::vector<DbFurnitureRow>& furnitureOut)
+{
+    SQLHSTMT stmt = SQL_NULL_HSTMT;
+
+    if (Ok(SQLAllocHandle(SQL_HANDLE_STMT, static_cast<SQLHDBC>(dbc), &stmt)) == false)
+    {
+        RecordError(SQL_HANDLE_DBC, dbc, "world alloc");
+        return false;
+    }
+
+    bool ok = Ok(ODBC_PREPARE(stmt, reinterpret_cast<SQLCHAR*>(const_cast<char*>("{CALL sp_world_load()}")), SQL_NTS)) &&
+              Ok(SQLExecute(stmt));
+
+    if (ok)
+    {
+        SQLSMALLINT columns = 0;
+        SQLLEN ind = 0;
+        SQLNumResultCols(stmt, &columns);
+
+        // 집: house_id, owner_name, world_x, world_y
+        while (columns >= 4 && Ok(SQLFetch(stmt)))
+        {
+            SQLBIGINT id = 0;
+            char16_t name[32] = {};
+            SQLLEN nameLen = 0;
+            SQLREAL x = 0.0f, y = 0.0f;
+
+            SQLGetData(stmt, 1, SQL_C_SBIGINT, &id, 0, &ind);
+            SQLGetData(stmt, 2, SQL_C_WCHAR, name, sizeof(name), &nameLen);
+            SQLGetData(stmt, 3, SQL_C_FLOAT, &x, 0, &ind);
+            SQLGetData(stmt, 4, SQL_C_FLOAT, &y, 0, &ind);
+
+            std::size_t chars = nameLen > 0 ? static_cast<std::size_t>(nameLen) / sizeof(char16_t) : 0;
+            if (chars > 31) { chars = 31; }
+            housesOut.push_back({ static_cast<std::uint64_t>(id), Utf16ToUtf8(name, chars), x, y });
+        }
+
+        // 가구: furniture_id, house_id, item_type, x, y, rotation
+        if (Ok(SQLMoreResults(stmt)))
+        {
+            SQLNumResultCols(stmt, &columns);
+
+            while (columns >= 6 && Ok(SQLFetch(stmt)))
+            {
+                SQLBIGINT id = 0, houseId = 0;
+                SQLINTEGER itemType = 0, rotation = 0;
+                SQLREAL x = 0.0f, y = 0.0f;
+
+                SQLGetData(stmt, 1, SQL_C_SBIGINT, &id, 0, &ind);
+                SQLGetData(stmt, 2, SQL_C_SBIGINT, &houseId, 0, &ind);
+                SQLGetData(stmt, 3, SQL_C_SLONG, &itemType, 0, &ind);
+                SQLGetData(stmt, 4, SQL_C_FLOAT, &x, 0, &ind);
+                SQLGetData(stmt, 5, SQL_C_FLOAT, &y, 0, &ind);
+                SQLGetData(stmt, 6, SQL_C_SLONG, &rotation, 0, &ind);
+
+                furnitureOut.push_back({ static_cast<std::uint64_t>(id), static_cast<std::uint64_t>(houseId), itemType, x, y, rotation });
+            }
+        }
+    }
+    else
+    {
+        RecordError(SQL_HANDLE_STMT, stmt, "world load");
+    }
+
+    DrainResults(stmt);
+    SQLFreeHandle(SQL_HANDLE_STMT, stmt);
+    return ok;
+}
+
 // ---------------------------------------------------------------- DbWorker
 
 bool DbWorker::Start(const std::string& connectionString)
@@ -454,6 +656,26 @@ void DbWorker::Post(Job job)
         queue.push_back(std::move(job));
     }
     queueReady.notify_one();
+}
+
+void DbWorker::RunSync(Job job)
+{
+    std::mutex doneLock;
+    std::condition_variable doneSignal;
+    bool done = false;
+
+    Post([&](Database& db)
+    {
+        job(db);
+        {
+            std::lock_guard<std::mutex> lock(doneLock);
+            done = true;
+        }
+        doneSignal.notify_one();
+    });
+
+    std::unique_lock<std::mutex> lock(doneLock);
+    doneSignal.wait(lock, [&]() { return done; });
 }
 
 std::size_t DbWorker::GetQueueSize()

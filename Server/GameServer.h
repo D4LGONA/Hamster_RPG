@@ -13,6 +13,7 @@
 #include "SectorGrid.h"
 #include "WorldGen.h"
 #include "Database.h"
+#include "Furniture.h"
 
 enum class PACKET_CHECK
 {
@@ -60,6 +61,20 @@ private:
     // 2026-11-13: 아이템 / 반격
     void ProcessUseItem(std::uint32_t playerId, const CS_USE_ITEM_PACKET* packet);
     void ProcessEnhance(std::uint32_t playerId);
+
+    // 2026-11-13: 가구 (GameServer_Furniture.cpp)
+    void ProcessFurniturePlace(std::uint32_t playerId, const CS_FURNITURE_PLACE_PACKET* packet);
+    void ProcessFurnitureRemove(std::uint32_t playerId, const CS_FURNITURE_REMOVE_PACKET* packet);
+    void ProcessFurnitureMove(std::uint32_t playerId, const CS_FURNITURE_MOVE_PACKET* packet);
+    // 권한·연타 검사. 통과하면 그 집을 돌려준다. 실패면 nullptr + reason. playersLock 안에서.
+    House* CheckFurnitureAccess(Player& player, std::uint8_t& reason);
+    // 좌표·출입구·겹침·한도 검사. ignoreId는 옮길 때 자기 자신을 빼려고. playersLock 안에서.
+    bool CheckFurnitureFits(const Furniture& candidate, std::uint32_t ignoreId, std::uint8_t& reason);
+    void CollectHouseFurnitureSpawns(std::uint32_t houseId, std::vector<SC_FURNITURE_SPAWN_PACKET>& out);
+    void CollectHouseMembers(std::uint32_t houseId, std::vector<std::uint32_t>& out);   // 그 집 안에 있는 사람들
+    void SendFurnitureFail(std::uint32_t playerId, std::uint8_t reason);
+    // 서버 시작 때 DB에서 집과 가구를 불러와 메모리에 올린다.
+    void LoadWorldFromDb();
     void SendInventory(std::uint32_t playerId, const SC_INVENTORY_PACKET& packet);
     // 처치 보상 + 드랍. ProcessAttack이 playersLock 안에서 부른다. 보낼 드랍 패킷은 dropSends에 모은다.
     void GrantKillRewards(Player& killer, const Monster& monster, bool& leveledUp,
@@ -324,6 +339,15 @@ private:
         float ttl;   // 남은 시간
     };
     std::unordered_map<std::uint32_t, GroundDrop> groundDrops;
+
+    // 가구. playersLock으로 보호(집/플레이어와 같은 락).
+    std::unordered_map<std::uint32_t, Furniture> furnitures;                              // id -> 가구
+    std::unordered_map<std::uint32_t, std::vector<std::uint32_t>> houseFurnitures;        // houseId -> 가구 id들
+    static constexpr std::uint32_t FURNITURE_ID_BASE = 3000000;
+    std::uint32_t nextFurnitureId = FURNITURE_ID_BASE;
+    static constexpr std::size_t MAX_FURNITURE_PER_HOUSE = 30;
+    static constexpr float FURNITURE_REQUEST_INTERVAL = 0.2f;   // 같은 사람 가구 요청은 0.2초에 한 번
+    static constexpr float FURNITURE_ENTRY_CLEAR = 1.0f;        // 들어와서 서는 자리 주변은 비워 둔다
     std::uint32_t nextDropId = 1;
     std::mt19937 dropRng{ std::random_device{}() };
 

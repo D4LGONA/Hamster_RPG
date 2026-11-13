@@ -72,6 +72,9 @@ Assets/Scripts/
   UI/GameHUD.cs                   HUD (초상화·HP/경험치·골드, 미니맵, 레벨업/획득 알림, 상태창 Tab/C) · 800x800 기준 · 로그인하면 자동 생성
   Items/ItemTable.cs              아이템 이름 · 설명 · 아이콘 (id는 서버와 같게)
   Items/GroundItem.cs             바닥 아이템 그림 (톡 튀어 오르고 둥실, 주우면 빨려 들어감)
+  House/FurnitureTable.cs         가구 종류·크기(서버와 같게) · 미리보기 판정
+  House/HouseFurnitureView.cs     받은 가구 목록대로 그리기
+  House/HouseBuildMode.cs         꾸미기 모드(B): 고르기·미리보기·회전·놓기·옮기기·치우기
   UI/TitleScreen.cs               타이틀 화면 (배경 · 로고 · 걸어다니는 몬스터 · 이름 입력) · TitleScene에서 자동 생성
     MonsterHealthBar.cs           몬스터 체력바 (런타임 생성)
     DamageNumber.cs               떠오르는 데미지 숫자 (런타임 생성)
@@ -99,7 +102,8 @@ Server/
   WorldGen.h        월드 생성 공식 (클라 WorldGen.cs 와 1:1)
   Database.h/.cpp   MySQL(ODBC) 연결 · DB 전용 스레드 · 캐릭터/가방 불러오기·저장
   Item.h            아이템 표 · 가방(20칸) · 몬스터별 드랍 표
-  GameServer_Item.cpp  처치 보상 · 개인 드랍 · 자동 줍기 · 아이템 사용/장착 · 몬스터 반격
+  GameServer_Item.cpp  처치 보상 · 개인 드랍 · 자동 줍기 · 아이템 사용/장착 · 몬스터 반격 · 강화
+  Furniture.h / GameServer_Furniture.cpp  가구 크기 표 · 설치/이동/치우기 검사 · 집 단위 전송 · DB 불러오기
   GameServer_Chunk.cpp  청크 켜기/끄기 · 청크 몬스터 생성/정리
   protocol.h        패킷 정의 (클라 Protocol.cs 와 1:1)
 
@@ -198,6 +202,27 @@ Docs/
 
 ---
 
+## 집 꾸미기 (가구)
+
+설계: [Docs/FurnitureDesign.md](Docs/FurnitureDesign.md). 자기 집 안에서 `B`를 누르면 꾸미기 모드.
+
+| 가구 | 크기(유닛) | 비고 |
+|---|---|---|
+| 침대 | 2.0 × 1.2 | |
+| 책상 | 1.6 × 0.8 | |
+| 의자 | 0.7 × 0.7 | |
+| 화분 | 0.6 × 0.6 | |
+| 러그 | 2.0 × 1.5 | 바닥 장식 — 다른 가구와 겹쳐도 됨, 입구에도 깔 수 있음 |
+
+- 조작: 가구 버튼 → 미리보기(초록 = 놓을 수 있음 / 빨강 = 안 됨) · `R` 돌리기 · 클릭 놓기 · 우클릭 취소 · 놓인 가구 클릭해 옮기기 · 들고 `X` 치우기
+- **서버 검사 순서**: 권한(내 집 안인가) → 연타(0.2초) → 좌표(방 ±4.5 안) → 입구 비우기 → 겹침(AABB, 4방향 회전이라 가로세로만 바꾸면 됨) → 개수(30개)
+- **보내는 범위**: 그 집 안에 있는 사람에게만. 월드 사람에게는 안 보냅니다(가구는 월드에 없음). 성공은 `SPAWN/MOVED/REMOVED`가 곧 신호이고 실패만 `RESULT`가 옵니다.
+- **클라는 서버가 보낸 대로 그린다**: 요청하고 응답을 기다리는 게 아니라, 받은 가구 목록과 화면을 맞춥니다. 미리보기 색은 같은 규칙으로 미리 계산할 뿐이고 판정은 서버.
+- **가구 id 대역**: 설계에선 `IsMonsterId`를 고치라고 했지만, 무한 월드에선 몬스터 id가 300만을 넘을 수 있어 대역을 나누는 대신 "가구는 시야/섹터에 안 들어가고 따로 보관"으로 해결했습니다.
+- **DB 저장**: 집과 가구가 DB에 남아서 서버를 껐다 켜도 그대로입니다. 시작할 때 `sp_world_load`로 전부 읽고, 바뀔 때마다 DB 스레드가 저장합니다(`Server/sql/03_house.sql`).
+
+---
+
 ## DB (캐릭터 저장)
 
 레벨 · 경험치 · 골드 · HP · 위치를 MySQL에 저장합니다. 접속을 끊었다 들어와도 그대로 이어집니다.
@@ -222,7 +247,7 @@ Docs/
 **처음 설정** (Windows)
 
 1. MySQL Server 8 과 **MySQL Connector/ODBC**(64비트)를 설치합니다.
-2. MySQL Workbench에서 `Server/sql/01_schema.sql` → `02_character.sql` 순서로 실행합니다.
+2. MySQL Workbench에서 `Server/sql/01_schema.sql` → `02_character.sql` → `03_house.sql` 순서로 실행합니다(여러 번 실행해도 안전).
 3. `Server/db_config.example.txt` 를 복사해 `Server/db_config.txt` 로 만들고 비밀번호를 적습니다(깃에는 안 올라갑니다).
 4. 서버를 켜면 콘솔에 `[DB] connected.` 가 뜹니다. 설정이 없거나 연결이 안 되면 **DB 없이** 예전처럼 돕니다.
 

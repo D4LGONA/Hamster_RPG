@@ -76,6 +76,15 @@ enum class PACKET_TYPE : std::uint16_t
     // 2026-11-13: 무기 강화 (Docs/Design.md 12장)
     CS_ENHANCE,        // 23  장착한 무기 강화 시도
     SC_ENHANCE_RESULT, // 24  성공/실패와 새 수치
+
+    // 2026-11-13: 가구 (Docs/FurnitureDesign.md). 성공은 SPAWN/MOVED/REMOVED가 곧 신호, 실패만 RESULT
+    CS_FURNITURE_PLACE,    // 25
+    CS_FURNITURE_REMOVE,   // 26
+    CS_FURNITURE_MOVE,     // 27
+    SC_FURNITURE_SPAWN,    // 28  설치 성공 / 집에 들어와서 목록 받을 때
+    SC_FURNITURE_MOVED,    // 29
+    SC_FURNITURE_REMOVED,  // 30
+    SC_FURNITURE_RESULT,   // 31  실패했을 때 요청자에게만
 };
 
 // 모든 패킷 맨 앞에 붙는 헤더(size + type)의 크기. 4바이트.
@@ -339,6 +348,80 @@ struct SC_ENHANCE_RESULT_PACKET
     int weaponAttack;          // 시도 후 무기 공격력(기본 + 강화)
     int cost;                  // 이번에 쓴 골드(실패해도 쓴다). 못 했으면 0
     int successRate;           // 이번 시도의 성공률(%)
+};
+
+// ==============================
+// 2026-11-13: 가구
+// ==============================
+struct CS_FURNITURE_PLACE_PACKET
+{
+    std::uint16_t size;
+    PACKET_TYPE type;
+
+    std::uint8_t itemType;   // 0 침대 / 1 책상 / 2 의자 / 3 화분 / 4 러그
+    std::uint8_t rotation;   // 0~3 (x90도)
+    float x;                 // 집 안 좌표
+    float y;
+};
+
+struct CS_FURNITURE_REMOVE_PACKET
+{
+    std::uint16_t size;
+    PACKET_TYPE type;
+
+    std::uint32_t furnitureId;
+};
+
+struct CS_FURNITURE_MOVE_PACKET
+{
+    std::uint16_t size;
+    PACKET_TYPE type;
+
+    std::uint32_t furnitureId;
+    std::uint8_t rotation;
+    float x;
+    float y;
+};
+
+struct SC_FURNITURE_SPAWN_PACKET
+{
+    std::uint16_t size;
+    PACKET_TYPE type;
+
+    std::uint32_t furnitureId;
+    std::uint8_t itemType;
+    std::uint8_t rotation;
+    float x;
+    float y;
+};
+
+struct SC_FURNITURE_MOVED_PACKET
+{
+    std::uint16_t size;
+    PACKET_TYPE type;
+
+    std::uint32_t furnitureId;
+    std::uint8_t rotation;
+    float x;
+    float y;
+};
+
+struct SC_FURNITURE_REMOVED_PACKET
+{
+    std::uint16_t size;
+    PACKET_TYPE type;
+
+    std::uint32_t furnitureId;
+};
+
+// 실패 이유: 1 집 밖 / 2 남의 집 / 3 방 밖·이상한 좌표 / 4 다른 가구와 겹침 / 5 출입구 막음
+//            6 개수 한도 / 7 너무 빠른 연타 / 8 없는 가구
+struct SC_FURNITURE_RESULT_PACKET
+{
+    std::uint16_t size;
+    PACKET_TYPE type;
+
+    std::uint8_t reason;
 };
 
 struct SC_PLAYER_FAINT_PACKET
