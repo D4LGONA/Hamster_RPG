@@ -1,5 +1,5 @@
 -- 2026-11-12: 캐릭터 저장 (DB 1단계).
--- 2026-11-13: 인벤토리(20칸)와 무기 장착 칸 추가.
+-- 2026-11-13: 인벤토리(20칸)와 무기 장착 칸 추가. 무기 강화 수치(enhance) 추가.
 --
 -- 실행 방법: 01_schema.sql 다음에 MySQL Workbench에서 이 파일을 열고 번개(⚡) 버튼으로 전체 실행.
 -- 여러 번 실행해도 안전하다(테이블은 IF NOT EXISTS, 프로시저는 지우고 다시 만든다).
@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS player_inventory
     slot     TINYINT UNSIGNED  NOT NULL,
     item_id  SMALLINT UNSIGNED NOT NULL,
     count    SMALLINT UNSIGNED NOT NULL,
+    enhance  TINYINT UNSIGNED  NOT NULL DEFAULT 0,             -- 무기 강화 수치(+0 ~ +10)
 
     PRIMARY KEY (name, slot),
     CONSTRAINT fk_inventory_character FOREIGN KEY (name) REFERENCES player_character (name) ON DELETE CASCADE,
@@ -72,10 +73,24 @@ CREATE TABLE IF NOT EXISTS player_inventory
     CONSTRAINT chk_inventory_count CHECK (count > 0)
 ) ENGINE = InnoDB;
 
+-- 강화 수치 열이 없는 예전 테이블이면 붙인다
+DROP PROCEDURE IF EXISTS sp_migrate_enhance;
+DELIMITER //
+CREATE PROCEDURE sp_migrate_enhance()
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.COLUMNS
+                    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'player_inventory' AND COLUMN_NAME = 'enhance') THEN
+        ALTER TABLE player_inventory ADD COLUMN enhance TINYINT UNSIGNED NOT NULL DEFAULT 0 AFTER count;
+    END IF;
+END //
+DELIMITER ;
+CALL sp_migrate_enhance();
+DROP PROCEDURE sp_migrate_enhance;
+
 -- ---------------------------------------------------------------
 -- sp_character_load: 이름으로 불러오기. 없으면 새로 만들고 기본값을 돌려준다.
 -- 결과 1: level, exp, gold, hp, pos_x, pos_y, is_new (1이면 방금 만든 캐릭터), weapon_slot
--- 결과 2: 인벤토리 (slot, item_id, count)
+-- 결과 2: 인벤토리 (slot, item_id, count, enhance)
 -- ---------------------------------------------------------------
 DROP PROCEDURE IF EXISTS sp_character_load;
 DELIMITER //
@@ -95,7 +110,7 @@ BEGIN
       FROM player_character
      WHERE name = p_name;
 
-    SELECT slot, item_id, count
+    SELECT slot, item_id, count, enhance
       FROM player_inventory
      WHERE name = p_name
      ORDER BY slot;
@@ -132,9 +147,10 @@ CREATE PROCEDURE sp_inventory_set(
     IN p_name    VARCHAR(20),
     IN p_slot    TINYINT UNSIGNED,
     IN p_item_id SMALLINT UNSIGNED,
-    IN p_count   SMALLINT UNSIGNED)
+    IN p_count   SMALLINT UNSIGNED,
+    IN p_enhance TINYINT UNSIGNED)
 BEGIN
-    INSERT INTO player_inventory (name, slot, item_id, count) VALUES (p_name, p_slot, p_item_id, p_count);
+    INSERT INTO player_inventory (name, slot, item_id, count, enhance) VALUES (p_name, p_slot, p_item_id, p_count, p_enhance);
 END //
 DELIMITER ;
 
@@ -143,6 +159,6 @@ DELIMITER ;
 -- ---------------------------------------------------------------
 -- CALL sp_character_load('test');
 -- CALL sp_character_save('test', 3, 40, 120, 90, 12.5, -3.0, 0);
--- CALL sp_inventory_set('test', 0, 101, 1);
+-- CALL sp_inventory_set('test', 0, 101, 1, 3);
 -- SELECT * FROM player_character;
 SHOW TABLES;

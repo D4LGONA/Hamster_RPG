@@ -72,6 +72,10 @@ enum class PACKET_TYPE : std::uint16_t
     SC_ITEM_REMOVE,    // 20  바닥 아이템이 사라졌다(주웠거나 시간이 다 됐다)
     SC_ITEM_PICKUP,    // 21  주웠다(알림 표시용)
     SC_PLAYER_FAINT,   // 22  HP가 0이 되어 광장으로 돌아왔다
+
+    // 2026-11-13: 무기 강화 (Docs/Design.md 12장)
+    CS_ENHANCE,        // 23  장착한 무기 강화 시도
+    SC_ENHANCE_RESULT, // 24  성공/실패와 새 수치
 };
 
 // 모든 패킷 맨 앞에 붙는 헤더(size + type)의 크기. 4바이트.
@@ -269,6 +273,7 @@ struct InventorySlotData
 {
     std::uint16_t itemId;   // 0이면 빈 칸
     std::uint16_t count;
+    std::uint8_t enhance;   // 무기 강화 수치(+0 ~ +10). 무기가 아니면 0
 };
 
 struct CS_USE_ITEM_PACKET
@@ -315,6 +320,25 @@ struct SC_ITEM_PICKUP_PACKET
 
     std::uint16_t itemId;
     std::uint16_t count;
+};
+
+// 장착한 무기를 강화한다. 어느 칸인지는 서버가 장착 칸을 본다(클라가 칸을 고르지 않는다).
+struct CS_ENHANCE_PACKET
+{
+    std::uint16_t size;
+    PACKET_TYPE type;
+};
+
+struct SC_ENHANCE_RESULT_PACKET
+{
+    std::uint16_t size;
+    PACKET_TYPE type;
+
+    std::uint8_t result;       // 0 실패 / 1 성공 / 2 골드 부족 / 3 무기 없음 / 4 최대 강화
+    std::uint8_t enhanceLevel; // 시도 후 수치
+    int weaponAttack;          // 시도 후 무기 공격력(기본 + 강화)
+    int cost;                  // 이번에 쓴 골드(실패해도 쓴다). 못 했으면 0
+    int successRate;           // 이번 시도의 성공률(%)
 };
 
 struct SC_PLAYER_FAINT_PACKET

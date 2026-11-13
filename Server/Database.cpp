@@ -261,13 +261,14 @@ bool Database::TryLoad(const std::string& name, CharacterData& out)
                     SQLNumResultCols(stmt, &columns);
                 }
 
-                while (columns >= 3 && Ok(SQLFetch(stmt)))
+                while (columns >= 4 && Ok(SQLFetch(stmt)))
                 {
-                    SQLINTEGER slot = 0, itemId = 0, count = 0;
+                    SQLINTEGER slot = 0, itemId = 0, count = 0, enhance = 0;
                     SQLGetData(stmt, 1, SQL_C_SLONG, &slot, 0, &ind);
                     SQLGetData(stmt, 2, SQL_C_SLONG, &itemId, 0, &ind);
                     SQLGetData(stmt, 3, SQL_C_SLONG, &count, 0, &ind);
-                    out.items.push_back({ slot, static_cast<std::uint16_t>(itemId), static_cast<std::uint16_t>(count) });
+                    SQLGetData(stmt, 4, SQL_C_SLONG, &enhance, 0, &ind);
+                    out.items.push_back({ slot, static_cast<std::uint16_t>(itemId), static_cast<std::uint16_t>(count), enhance });
                 }
             }
         }
@@ -303,7 +304,7 @@ bool Database::TrySave(const std::vector<CharacterData>& list)
 
     // 인벤토리 한 칸 저장용 두 번째 문장. 이름 버퍼는 위와 같은 것을 같이 가리킨다.
     SQLHSTMT itemStmt = SQL_NULL_HSTMT;
-    SQLINTEGER itemSlot = 0, itemId = 0, itemCount = 0;
+    SQLINTEGER itemSlot = 0, itemId = 0, itemCount = 0, itemEnhance = 0;
 
     if (Ok(SQLAllocHandle(SQL_HANDLE_STMT, conn, &itemStmt)) == false)
     {
@@ -322,11 +323,12 @@ bool Database::TrySave(const std::vector<CharacterData>& list)
         Ok(SQLBindParameter(stmt, 6, SQL_PARAM_INPUT, SQL_C_FLOAT, SQL_REAL, 0, 0, &x, 0, nullptr)) &&
         Ok(SQLBindParameter(stmt, 7, SQL_PARAM_INPUT, SQL_C_FLOAT, SQL_REAL, 0, 0, &y, 0, nullptr)) &&
         Ok(SQLBindParameter(stmt, 8, SQL_PARAM_INPUT, SQL_C_SLONG, SQL_INTEGER, 0, 0, &weaponSlot, 0, nullptr)) &&
-        Ok(ODBC_PREPARE(itemStmt, reinterpret_cast<SQLCHAR*>(const_cast<char*>("{CALL sp_inventory_set(?, ?, ?, ?)}")), SQL_NTS)) &&
+        Ok(ODBC_PREPARE(itemStmt, reinterpret_cast<SQLCHAR*>(const_cast<char*>("{CALL sp_inventory_set(?, ?, ?, ?, ?)}")), SQL_NTS)) &&
         Ok(SQLBindParameter(itemStmt, 1, SQL_PARAM_INPUT, SQL_C_WCHAR, SQL_WVARCHAR, 20, 0, nameBuffer, sizeof(nameBuffer), &nameBytes)) &&
         Ok(SQLBindParameter(itemStmt, 2, SQL_PARAM_INPUT, SQL_C_SLONG, SQL_INTEGER, 0, 0, &itemSlot, 0, nullptr)) &&
         Ok(SQLBindParameter(itemStmt, 3, SQL_PARAM_INPUT, SQL_C_SLONG, SQL_INTEGER, 0, 0, &itemId, 0, nullptr)) &&
-        Ok(SQLBindParameter(itemStmt, 4, SQL_PARAM_INPUT, SQL_C_SLONG, SQL_INTEGER, 0, 0, &itemCount, 0, nullptr));
+        Ok(SQLBindParameter(itemStmt, 4, SQL_PARAM_INPUT, SQL_C_SLONG, SQL_INTEGER, 0, 0, &itemCount, 0, nullptr)) &&
+        Ok(SQLBindParameter(itemStmt, 5, SQL_PARAM_INPUT, SQL_C_SLONG, SQL_INTEGER, 0, 0, &itemEnhance, 0, nullptr));
 
     if (success)
     {
@@ -354,7 +356,7 @@ bool Database::TrySave(const std::vector<CharacterData>& list)
             // 가방: sp_character_save가 비웠으니 남은 칸만 다시 넣는다
             for (const CharacterData::ItemRow& row : c.items)
             {
-                itemSlot = row.slot; itemId = row.itemId; itemCount = row.count;
+                itemSlot = row.slot; itemId = row.itemId; itemCount = row.count; itemEnhance = row.enhance;
 
                 if (Ok(SQLExecute(itemStmt)) == false)
                 {

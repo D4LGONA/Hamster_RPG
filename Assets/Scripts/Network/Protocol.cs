@@ -68,7 +68,11 @@ public static class Protocol
         SC_ITEM_DROP = 19,
         SC_ITEM_REMOVE = 20,
         SC_ITEM_PICKUP = 21,
-        SC_PLAYER_FAINT = 22
+        SC_PLAYER_FAINT = 22,
+
+        // 2026-11-13: 무기 강화
+        CS_ENHANCE = 23,
+        SC_ENHANCE_RESULT = 24
     }
     public struct PlayerStatsData
     {
@@ -171,6 +175,17 @@ public static class Protocol
         int offset = 0;
         WriteHeader(packet, ref offset, PacketType.CS_USE_ITEM);
         packet[offset] = (byte)slot;
+
+        return packet;
+    }
+
+    // 장착한 무기 강화. 어느 칸인지는 서버가 장착 칸을 본다.
+    public static byte[] MakeEnhancePacket()
+    {
+        byte[] packet = new byte[HeaderSize];
+
+        int offset = 0;
+        WriteHeader(packet, ref offset, PacketType.CS_ENHANCE);
 
         return packet;
     }

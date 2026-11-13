@@ -333,3 +333,86 @@ void GameServer::ClearDropsOf(std::uint32_t ownerId)
         }
     }
 }
+
+// 2026-11-13: 무기 강화 (Docs/Design.md 12장). 판정은 전부 서버. 클라는 창에 보여줄 값만 같은 공식으로 미리 계산한다.
+//   골드 확인 -> 성공률 계산 -> 굴림 -> 골드 차감(실패해도) -> 성공이면 +1 -> 공격력 재계산 -> 결과/가방/스탯 전송
+void GameServer::ProcessEnhance(std::uint32_t playerId)
+{
+    SC_ENHANCE_RESULT_PACKET result{};
+    result.size = sizeof(SC_ENHANCE_RESULT_PACKET);
+    result.type = PACKET_TYPE::SC_ENHANCE_RESULT;
+
+    SC_INVENTORY_PACKET inventoryPacket{};
+    PlayerStats stats;
+    bool attempted = false;
+
+    {
+        std::lock_guard<std::mutex> lock(playersLock);
+
+        auto iter = players.find(playerId);
+
+        if (iter == players.end())
+        {
+            return;
+        }
+
+        Player& player = iter->second;
+        Inventory& inventory = player.GetInventory();
+        PlayerStats& s = player.GetStats();
+        const int level = inventory.GetEquippedEnhance();
+
+        if (level < 0)
+        {
+            result.result = 3;   // 장착한 무기가 없다
+        }
+        else if (level >= Enhance::MAX_LEVEL)
+        {
+            result.result = 4;
+            result.enhanceLevel = static_cast<std::uint8_t>(level);
+        }
+        else
+        {
+            const int cost = Enhance::CostOf(level);
+            const int rate = Enhance::SuccessRateOf(level);
+            result.successRate = rate;
+            result.enhanceLevel = static_cast<std::uint8_t>(level);
+
+            if (s.gold < cost)
+            {
+                result.result = 2;   // 골드 부족. 아무것도 쓰지 않는다
+            }
+            else
+            {
+                s.gold -= cost;
+                result.cost = cost;
+                attempted = true;
+
+                std::uniform_int_distribution<int> roll(1, 100);
+
+                if (roll(dropRng) <= rate)
+                {
+                    inventory.RaiseEquippedEnhance();
+                    player.RefreshWeaponStats();
+                    result.result = 1;
+                    result.enhanceLevel = static_cast<std::uint8_t>(level + 1);
+                }
+                else
+                {
+                    result.result = 0;   // 실패: 골드만 잃는다(하락/파괴 없음)
+                }
+            }
+        }
+
+        result.weaponAttack = inventory.GetWeaponAttack();
+        inventory.FillPacket(inventoryPacket);
+        stats = player.GetStats();
+    }
+
+    SendPacket(playerId, &result, result.size);
+
+    if (attempted)
+    {
+        SendInventory(playerId, inventoryPacket);
+        SendStatUpdate(playerId, stats);
+    }
+}

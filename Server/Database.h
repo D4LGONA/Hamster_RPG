@@ -35,7 +35,7 @@ struct CharacterData
     bool isNew = true;
 
     // 2026-11-13: 인벤토리. 빈 칸은 담지 않는다.
-    struct ItemRow { int slot; std::uint16_t itemId; std::uint16_t count; };
+    struct ItemRow { int slot; std::uint16_t itemId; std::uint16_t count; int enhance; };
     std::vector<ItemRow> items;
     int equippedSlot = -1;   // 무기 장착 칸. -1이면 맨손
 };

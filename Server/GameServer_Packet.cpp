@@ -76,6 +76,11 @@ int GameServer::ProcessPacket(std::uint32_t playerId, const char* data, int byte
                 ProcessHouseAction(playerId);
             break;
 
+        case PACKET_TYPE::CS_ENHANCE:
+            if (packetSize == sizeof(CS_ENHANCE_PACKET))
+                ProcessEnhance(playerId);
+            break;
+
         case PACKET_TYPE::CS_USE_ITEM:
             if (packetSize == sizeof(CS_USE_ITEM_PACKET))
                 ProcessUseItem(playerId, reinterpret_cast<const CS_USE_ITEM_PACKET*>(packetData));
@@ -249,7 +254,7 @@ void GameServer::CompleteLogin(std::uint32_t playerId, const std::string& player
         {
             for (const CharacterData::ItemRow& row : saved->items)
             {
-                player.GetInventory().SetSlot(row.slot, row.itemId, row.count);
+                player.GetInventory().SetSlot(row.slot, row.itemId, row.count, row.enhance);
             }
             player.GetInventory().SetEquippedSlot(saved->equippedSlot);
             player.GetStats().bonusAttack = player.GetInventory().GetWeaponAttack();   // LoadSaved의 Recalculate가 반영
@@ -329,7 +334,7 @@ CharacterData GameServer::MakeSaveData(const Player& player)
         const InventorySlotData& slot = inventory.GetSlot(i);
         if (slot.itemId != 0)
         {
-            data.items.push_back({ i, slot.itemId, slot.count });
+            data.items.push_back({ i, slot.itemId, slot.count, slot.enhance });
         }
     }
     data.equippedSlot = inventory.GetEquippedSlot();

@@ -71,6 +71,20 @@ namespace Items
     }
 }
 
+// 무기 강화 규칙 (Docs/Design.md 12장)
+namespace Enhance
+{
+    constexpr int MAX_LEVEL = 10;
+    constexpr int ATTACK_PER_LEVEL = 3;   // 성공할 때마다 무기 공격력 +3
+    constexpr int BASE_COST = 50;
+
+    // 비용: 50 x 2^수치  (+0 -> 50, +1 -> 100, +2 -> 200 ...). 실패하면 수치가 그대로라 같은 값으로 다시 시도.
+    inline int CostOf(int level) { return BASE_COST << level; }
+
+    // 성공률(%): max(10, 100 - 수치 x 10)
+    inline int SuccessRateOf(int level) { int rate = 100 - level * 10; return rate < 10 ? 10 : rate; }
+}
+
 // 20칸 가방 + 무기 장착 칸. 플레이어 하나에 하나. playersLock 안에서만 만진다.
 class Inventory
 {
@@ -113,6 +127,7 @@ public:
             std::uint16_t put = left < def->maxStack ? left : def->maxStack;
             slot.itemId = itemId;
             slot.count = put;
+            slot.enhance = 0;
             left = static_cast<std::uint16_t>(left - put);
         }
 
@@ -128,7 +143,13 @@ public:
         }
 
         const ItemDef* def = Items::Find(slots[equippedSlot].itemId);
-        return (def != nullptr && def->type == ItemType::Weapon) ? def->attack : 0;
+
+        if (def == nullptr || def->type != ItemType::Weapon)
+        {
+            return 0;
+        }
+
+        return def->attack + slots[equippedSlot].enhance * Enhance::ATTACK_PER_LEVEL;
     }
 
     void ConsumeOne(int index)
@@ -141,7 +162,7 @@ public:
             return;
         }
 
-        slot = InventorySlotData{ 0, 0 };
+        slot = InventorySlotData{ 0, 0, 0 };
 
         if (equippedSlot == index)
         {
@@ -151,18 +172,41 @@ public:
 
     void Clear()
     {
-        slots.fill(InventorySlotData{ 0, 0 });
+        slots.fill(InventorySlotData{ 0, 0, 0 });
         equippedSlot = -1;
     }
 
     // DB에서 불러올 때. 모르는 아이템 id나 범위 밖 칸은 버린다(아이템을 표에서 지웠을 때 서버가 죽지 않게).
-    void SetSlot(int index, std::uint16_t itemId, std::uint16_t count)
+    void SetSlot(int index, std::uint16_t itemId, std::uint16_t count, int enhance = 0)
     {
-        if (index < 0 || index >= INVENTORY_SLOTS || Items::Find(itemId) == nullptr || count == 0)
+        const ItemDef* def = Items::Find(itemId);
+
+        if (index < 0 || index >= INVENTORY_SLOTS || def == nullptr || count == 0)
         {
             return;
         }
-        slots[index] = InventorySlotData{ itemId, count };
+
+        if (def->type != ItemType::Weapon || enhance < 0) { enhance = 0; }
+        if (enhance > Enhance::MAX_LEVEL) { enhance = Enhance::MAX_LEVEL; }
+
+        slots[index] = InventorySlotData{ itemId, count, static_cast<std::uint8_t>(enhance) };
+    }
+
+    // 장착한 무기의 강화 수치를 1 올린다(성공 처리). 장착한 무기가 없으면 false.
+    bool RaiseEquippedEnhance()
+    {
+        if (GetWeaponAttack() == 0 || slots[equippedSlot].enhance >= Enhance::MAX_LEVEL)
+        {
+            return false;
+        }
+
+        ++slots[equippedSlot].enhance;
+        return true;
+    }
+
+    int GetEquippedEnhance() const
+    {
+        return GetWeaponAttack() > 0 ? slots[equippedSlot].enhance : -1;   // -1 = 무기 없음
     }
 
     void SetEquippedSlot(int index)

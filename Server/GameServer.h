@@ -59,6 +59,7 @@ private:
 
     // 2026-11-13: 아이템 / 반격
     void ProcessUseItem(std::uint32_t playerId, const CS_USE_ITEM_PACKET* packet);
+    void ProcessEnhance(std::uint32_t playerId);
     void SendInventory(std::uint32_t playerId, const SC_INVENTORY_PACKET& packet);
     // 처치 보상 + 드랍. ProcessAttack이 playersLock 안에서 부른다. 보낼 드랍 패킷은 dropSends에 모은다.
     void GrantKillRewards(Player& killer, const Monster& monster, bool& leveledUp,

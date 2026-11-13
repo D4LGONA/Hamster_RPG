@@ -6,6 +6,7 @@
 //   왼쪽      : 경험치/골드 획득 알림 (떠오르며 사라짐)
 //   가운데    : 상태창 (Tab 또는 C)
 //   2026-11-13: 가방 (I) — 칸을 누르면 먹기/무기 장착. Q는 회복 아이템 바로 먹기.
+//               강화 (E) — 장착한 무기를 강화. 성공률/비용은 서버와 같은 공식으로 미리 보여주고 판정은 서버가 한다.
 //               주운 아이템 알림, 쓰러짐 알림, 맞으면 화면 가장자리가 빨갛게 번쩍.
 //
 // 값은 전부 서버가 보내준 것(NetworkClient)이다. HUD가 계산하는 게임 값은 없다.
@@ -98,6 +99,16 @@ public class GameHUD : MonoBehaviour
     private readonly Image[] slotIcons = new Image[Protocol.InventorySlots];
     private readonly TextMeshProUGUI[] slotCounts = new TextMeshProUGUI[Protocol.InventorySlots];
     private readonly GameObject[] slotEquipped = new GameObject[Protocol.InventorySlots];
+    private readonly TextMeshProUGUI[] slotEnhance = new TextMeshProUGUI[Protocol.InventorySlots];
+
+    // 강화창
+    private GameObject enhanceWindow;
+    private Image enhanceIcon;
+    private RectTransform enhanceIconRect;
+    private TextMeshProUGUI enhanceName, enhanceAttack, enhanceRate, enhanceCost, enhanceResult;
+    private Button enhanceButton;
+    private float enhanceAnim;      // 결과 연출 남은 시간
+    private bool enhanceAnimSuccess;
     private TextMeshProUGUI itemInfoText;
     private int lastInventoryVersion = -1;
 
@@ -141,6 +152,7 @@ public class GameHUD : MonoBehaviour
         UpdateStats(net);
         UpdateStatusWindowToggle();
         UpdateInventory(net);
+        UpdateEnhanceWindow(net);
         UpdateMinimap(net);
         UpdateToasts();
     }
@@ -182,6 +194,7 @@ public class GameHUD : MonoBehaviour
         BuildToasts(canvasRect);
         BuildStatusWindow(canvasRect);
         BuildInventoryWindow(canvasRect);
+        BuildEnhanceWindow(canvasRect);
 
         NetworkClient net = NetworkClient.Instance;
         if (net != null)
@@ -200,6 +213,7 @@ public class GameHUD : MonoBehaviour
                 }
             };
             net.OnLocalPlayerHurt += () => hurtTimer = 0.35f;
+            net.OnEnhanceResult += OnEnhanceResult;
         }
 
         HideEmptySceneStatWindow();
@@ -640,6 +654,11 @@ public class GameHUD : MonoBehaviour
             slotCounts[i].outlineWidth = 0.25f;
             slotCounts[i].outlineColor = new Color32(30, 20, 14, 255);
 
+            slotEnhance[i] = Text(slot, "Enhance", "", 11, new Color32(140, 230, 255, 255), new Vector2(1, 1), new Vector2(-3, -2), new Vector2(30, 14), TextAlignmentOptions.Right);
+            slotEnhance[i].fontStyle = FontStyles.Bold;
+            slotEnhance[i].outlineWidth = 0.25f;
+            slotEnhance[i].outlineColor = new Color32(30, 20, 14, 255);
+
             TextMeshProUGUI equipped = Text(slot, "Equipped", "E", 12, Gold, new Vector2(0, 1), new Vector2(4, -2), new Vector2(16, 16), TextAlignmentOptions.Left);
             equipped.fontStyle = FontStyles.Bold;
             equipped.outlineWidth = 0.25f;
@@ -689,6 +708,7 @@ public class GameHUD : MonoBehaviour
             slotIcons[i].enabled = def != null;
             slotCounts[i].text = (def != null && slot.count > 1) ? slot.count.ToString() : "";
             slotEquipped[i].SetActive(i == equippedSlot);
+            slotEnhance[i].text = (def != null && slot.enhance > 0) ? "+" + slot.enhance : "";
         }
     }
 
@@ -726,7 +746,159 @@ public class GameHUD : MonoBehaviour
 
         NetworkClient.InventorySlot slot = net.GetInventorySlot(index);
         ItemTable.Def def = slot.itemId != 0 ? ItemTable.Find(slot.itemId) : null;
-        itemInfoText.text = def != null ? def.Name + "  ·  " + def.Description : "";
+        if (def == null)
+        {
+            itemInfoText.text = "";
+        }
+        else if (def.Kind == ItemTable.Kind.Weapon)
+        {
+            int attack = def.BaseAttack + slot.enhance * ItemTable.EnhanceAttackPerLevel;
+            itemInfoText.text = (slot.enhance > 0 ? "+" + slot.enhance + " " : "") + def.Name + "  ·  무기 · 공격력 +" + attack;
+        }
+        else
+        {
+            itemInfoText.text = def.Name + "  ·  " + def.Description;
+        }
+    }
+
+    // =====================================================================
+    // 2026-11-13: 강화창 (E)
+    // =====================================================================
+
+    private void BuildEnhanceWindow(RectTransform canvas)
+    {
+        RectTransform panel = Panel(canvas, "EnhanceWindow", panelSprite, new Vector2(0.5f, 0.5f), new Vector2(0, -20), new Vector2(300, 330));
+        panel.GetComponent<Image>().raycastTarget = true;
+        enhanceWindow = panel.gameObject;
+
+        TextMeshProUGUI title = Text(panel, "Title", "무기 강화", 20, Brown, new Vector2(0.5f, 1), new Vector2(0, -14), new Vector2(200, 28), TextAlignmentOptions.Center);
+        title.fontStyle = FontStyles.Bold;
+
+        RectTransform close = Panel(panel, "Close", panelDarkSprite, new Vector2(1, 1), new Vector2(-10, -10), new Vector2(30, 30));
+        Text(close, "X", "X", 16, Color.white, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(30, 30), TextAlignmentOptions.Center).fontStyle = FontStyles.Bold;
+        close.GetComponent<Image>().raycastTarget = true;
+        close.gameObject.AddComponent<Button>().onClick.AddListener(() => enhanceWindow.SetActive(false));
+
+        RectTransform frame = Panel(panel, "IconFrame", panelDarkSprite, new Vector2(0.5f, 1), new Vector2(0, -50), new Vector2(84, 84));
+        enhanceIcon = Img(frame, "Icon", null, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(60, 60));
+        enhanceIcon.preserveAspect = true;
+        enhanceIconRect = enhanceIcon.rectTransform;
+
+        enhanceName = Text(panel, "Name", "", 18, Brown, new Vector2(0.5f, 1), new Vector2(0, -142), new Vector2(260, 24), TextAlignmentOptions.Center);
+        enhanceName.fontStyle = FontStyles.Bold;
+        enhanceAttack = Text(panel, "Attack", "", 15, BrownSoft, new Vector2(0.5f, 1), new Vector2(0, -170), new Vector2(260, 22), TextAlignmentOptions.Center);
+        enhanceRate = Text(panel, "Rate", "", 15, BrownSoft, new Vector2(0.5f, 1), new Vector2(0, -194), new Vector2(260, 22), TextAlignmentOptions.Center);
+        enhanceCost = Text(panel, "Cost", "", 15, BrownSoft, new Vector2(0.5f, 1), new Vector2(0, -218), new Vector2(260, 22), TextAlignmentOptions.Center);
+
+        RectTransform button = Panel(panel, "EnhanceButton", Resources.Load<Sprite>("UI/ui_button"), new Vector2(0.5f, 0), new Vector2(0, 46), new Vector2(200, 44));
+        button.GetComponent<Image>().raycastTarget = true;
+        enhanceButton = button.gameObject.AddComponent<Button>();
+        enhanceButton.onClick.AddListener(() => NetworkClient.Instance?.SendEnhance());
+        TextMeshProUGUI label = Text(button, "Label", "강화하기", 19, Color.white, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(200, 44), TextAlignmentOptions.Center);
+        label.fontStyle = FontStyles.Bold;
+        label.outlineWidth = 0.22f;
+        label.outlineColor = new Color32(120, 60, 20, 255);
+
+        enhanceResult = Text(panel, "Result", "", 14, Brown, new Vector2(0.5f, 0), new Vector2(0, 16), new Vector2(280, 22), TextAlignmentOptions.Center);
+        enhanceResult.fontStyle = FontStyles.Bold;
+
+        enhanceWindow.SetActive(false);
+    }
+
+    private void UpdateEnhanceWindow(NetworkClient net)
+    {
+        bool chatting = ChatUI.Instance != null && ChatUI.Instance.IsChatting();
+
+        if (chatting == false && Input.GetKeyDown(KeyCode.E))
+        {
+            enhanceWindow.SetActive(!enhanceWindow.activeSelf);
+            enhanceResult.text = "";
+        }
+
+        // 결과 연출: 성공이면 통통 튀고, 실패면 좌우로 흔들린다
+        if (enhanceAnim > 0.0f)
+        {
+            enhanceAnim -= Time.deltaTime;
+            float t = Mathf.Clamp01(enhanceAnim / 0.5f);
+            enhanceIconRect.localScale = Vector3.one * (enhanceAnimSuccess ? 1.0f + 0.35f * t : 1.0f);
+            enhanceIconRect.anchoredPosition = new Vector2(enhanceAnimSuccess ? 0.0f : Mathf.Sin(enhanceAnim * 60.0f) * 6.0f * t, 0.0f);
+        }
+
+        if (enhanceWindow.activeSelf == false)
+        {
+            return;
+        }
+
+        int equipped = net.GetEquippedWeaponSlot();
+        NetworkClient.InventorySlot slot = equipped >= 0 ? net.GetInventorySlot(equipped) : default;
+        ItemTable.Def def = slot.itemId != 0 ? ItemTable.Find(slot.itemId) : null;
+        int gold = net.HasMyStats() ? net.GetMyStats().gold : 0;
+
+        if (def == null || def.Kind != ItemTable.Kind.Weapon)
+        {
+            enhanceIcon.enabled = false;
+            enhanceName.text = "장착한 무기가 없어요";
+            enhanceAttack.text = "가방(I)에서 무기를 눌러 장착하세요";
+            enhanceRate.text = "";
+            enhanceCost.text = "";
+            enhanceButton.interactable = false;
+            return;
+        }
+
+        int level = slot.enhance;
+        int attack = def.BaseAttack + level * ItemTable.EnhanceAttackPerLevel;
+
+        enhanceIcon.enabled = true;
+        enhanceIcon.sprite = def.Icon;
+        enhanceName.text = (level > 0 ? "+" + level + " " : "") + def.Name;
+
+        if (level >= ItemTable.EnhanceMaxLevel)
+        {
+            enhanceAttack.text = "공격력 +" + attack + "   (최대 강화)";
+            enhanceRate.text = "";
+            enhanceCost.text = "";
+            enhanceButton.interactable = false;
+            return;
+        }
+
+        int cost = ItemTable.EnhanceCost(level);
+        enhanceAttack.text = "공격력 +" + attack + "  →  +" + (attack + ItemTable.EnhanceAttackPerLevel);
+        enhanceRate.text = "성공률 " + ItemTable.EnhanceRate(level) + "%   ·   실패해도 수치는 그대로";
+        enhanceCost.text = "비용 " + cost.ToString("N0") + " 해바라기씨   (보유 " + gold.ToString("N0") + ")";
+        enhanceCost.color = gold >= cost ? BrownSoft : (Color)new Color32(210, 70, 70, 255);
+        enhanceButton.interactable = gold >= cost;
+    }
+
+    private void OnEnhanceResult(int result, int level, int weaponAttack, int cost, int rate)
+    {
+        switch (result)
+        {
+            case 1:
+                enhanceResult.text = "성공! +" + level + " (공격력 +" + weaponAttack + ")";
+                enhanceResult.color = new Color32(60, 160, 70, 255);
+                enhanceAnim = 0.5f;
+                enhanceAnimSuccess = true;
+                ShowToast("강화 성공!  +" + level, Gold);
+                break;
+            case 0:
+                enhanceResult.text = "실패... 해바라기씨 " + cost.ToString("N0") + "개를 잃었어요";
+                enhanceResult.color = new Color32(200, 70, 70, 255);
+                enhanceAnim = 0.5f;
+                enhanceAnimSuccess = false;
+                break;
+            case 2:
+                enhanceResult.text = "해바라기씨가 모자라요";
+                enhanceResult.color = new Color32(200, 70, 70, 255);
+                break;
+            case 3:
+                enhanceResult.text = "장착한 무기가 없어요";
+                enhanceResult.color = BrownSoft;
+                break;
+            default:
+                enhanceResult.text = "이미 최대 강화예요";
+                enhanceResult.color = BrownSoft;
+                break;
+        }
     }
 
     // 씬에 만들다 만 빈 상태창(StatWindow)이 있으면 HUD 상태창과 겹치므로 숨긴다.

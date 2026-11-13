@@ -135,7 +135,7 @@ public class NetworkClient : MonoBehaviour
     public int GetStatVersion() { return statVersion; }
 
     // ---------------- 2026-11-13: 인벤토리 / 바닥 아이템 ----------------
-    public struct InventorySlot { public ushort itemId; public ushort count; }
+    public struct InventorySlot { public ushort itemId; public ushort count; public byte enhance; }
 
     private readonly InventorySlot[] inventory = new InventorySlot[Protocol.InventorySlots];
     private int equippedWeaponSlot = -1;
@@ -150,6 +150,30 @@ public class NetworkClient : MonoBehaviour
     public event System.Action<ushort, ushort> OnItemPickedUp;   // (itemId, count)
     public event System.Action<int> OnFainted;                   // 잃은 골드
     public event System.Action OnLocalPlayerHurt;
+    // (결과 0 실패 / 1 성공 / 2 골드 부족 / 3 무기 없음 / 4 최대, 새 수치, 무기 공격력, 쓴 골드, 성공률)
+    public event System.Action<int, int, int, int, int> OnEnhanceResult;
+
+    public void SendEnhance()
+    {
+        if (isConnected == false || isLoggedIn == false || stream == null)
+        {
+            return;
+        }
+
+        SendRaw(Protocol.MakeEnhancePacket());
+    }
+
+    private void HandleEnhanceResult(byte[] packet)
+    {
+        int offset = Protocol.HeaderSize;
+        int result = Protocol.ReadByte(packet, ref offset);
+        int level = Protocol.ReadByte(packet, ref offset);
+        int weaponAttack = Protocol.ReadInt(packet, ref offset);
+        int cost = Protocol.ReadInt(packet, ref offset);
+        int rate = Protocol.ReadInt(packet, ref offset);
+
+        mainThreadActions.Enqueue(() => OnEnhanceResult?.Invoke(result, level, weaponAttack, cost, rate));
+    }
 
     private void HandleInventory(byte[] packet)
     {
@@ -161,6 +185,7 @@ public class NetworkClient : MonoBehaviour
         {
             slots[i].itemId = Protocol.ReadUShort(packet, ref offset);
             slots[i].count = Protocol.ReadUShort(packet, ref offset);
+            slots[i].enhance = Protocol.ReadByte(packet, ref offset);
         }
 
         mainThreadActions.Enqueue(() =>
@@ -565,6 +590,9 @@ public class NetworkClient : MonoBehaviour
                 break;
             case Protocol.PacketType.SC_PLAYER_FAINT:
                 HandlePlayerFaint(packet);
+                break;
+            case Protocol.PacketType.SC_ENHANCE_RESULT:
+                HandleEnhanceResult(packet);
                 break;
             default:
                 mainThreadActions.Enqueue(() => Debug.LogWarning("[NETWORK] Unknown packet type: " + packetType));
