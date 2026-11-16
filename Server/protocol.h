@@ -433,3 +433,22 @@ struct SC_PLAYER_FAINT_PACKET
 };
 
 #pragma pack(pop)
+
+// 2026-11-16: 패킷 크기를 고정한다(클라 Protocol.cs가 같은 바이트 수로 읽는다). 어긋나면 빌드가 깨져서 바로 안다.
+// (main 브랜치 2026-09-26 커밋의 아이디어를 가져왔다)
+constexpr std::size_t PACKET_HEADER_BYTES = sizeof(std::uint16_t) + sizeof(PACKET_TYPE);
+static_assert(sizeof(CS_USE_ITEM_PACKET) == PACKET_HEADER_BYTES + 1, "CS_USE_ITEM 크기 불일치");
+static_assert(sizeof(SC_INVENTORY_PACKET) == PACKET_HEADER_BYTES + 1 + INVENTORY_SLOTS * 5, "SC_INVENTORY 크기 불일치");
+static_assert(sizeof(SC_ITEM_DROP_PACKET) == PACKET_HEADER_BYTES + 16, "SC_ITEM_DROP 크기 불일치");
+static_assert(sizeof(SC_ITEM_REMOVE_PACKET) == PACKET_HEADER_BYTES + 4, "SC_ITEM_REMOVE 크기 불일치");
+static_assert(sizeof(SC_ITEM_PICKUP_PACKET) == PACKET_HEADER_BYTES + 4, "SC_ITEM_PICKUP 크기 불일치");
+static_assert(sizeof(SC_PLAYER_FAINT_PACKET) == PACKET_HEADER_BYTES + 4, "SC_PLAYER_FAINT 크기 불일치");
+static_assert(sizeof(CS_ENHANCE_PACKET) == PACKET_HEADER_BYTES, "CS_ENHANCE 크기 불일치");
+static_assert(sizeof(SC_ENHANCE_RESULT_PACKET) == PACKET_HEADER_BYTES + 14, "SC_ENHANCE_RESULT 크기 불일치");
+static_assert(sizeof(CS_FURNITURE_PLACE_PACKET) == PACKET_HEADER_BYTES + 10, "CS_FURNITURE_PLACE 크기 불일치");
+static_assert(sizeof(CS_FURNITURE_REMOVE_PACKET) == PACKET_HEADER_BYTES + 4, "CS_FURNITURE_REMOVE 크기 불일치");
+static_assert(sizeof(CS_FURNITURE_MOVE_PACKET) == PACKET_HEADER_BYTES + 13, "CS_FURNITURE_MOVE 크기 불일치");
+static_assert(sizeof(SC_FURNITURE_SPAWN_PACKET) == PACKET_HEADER_BYTES + 14, "SC_FURNITURE_SPAWN 크기 불일치");
+static_assert(sizeof(SC_FURNITURE_MOVED_PACKET) == PACKET_HEADER_BYTES + 13, "SC_FURNITURE_MOVED 크기 불일치");
+static_assert(sizeof(SC_FURNITURE_REMOVED_PACKET) == PACKET_HEADER_BYTES + 4, "SC_FURNITURE_REMOVED 크기 불일치");
+static_assert(sizeof(SC_FURNITURE_RESULT_PACKET) == PACKET_HEADER_BYTES + 1, "SC_FURNITURE_RESULT 크기 불일치");
