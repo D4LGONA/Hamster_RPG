@@ -88,7 +88,18 @@ public static class Protocol
         SC_RAID_SLAM = 33,
         SC_RAID_RESULT = 34,
         CS_RANKING_REQUEST = 35,
-        SC_RANKING = 36
+        SC_RANKING = 36,
+
+        // 2026-11-16: 1:1 거래
+        CS_TRADE_REQUEST = 37,
+        SC_TRADE_INVITE = 38,
+        CS_TRADE_RESPOND = 39,
+        SC_TRADE_OPEN = 40,
+        CS_TRADE_OFFER = 41,
+        SC_TRADE_UPDATE = 42,
+        CS_TRADE_CONFIRM = 43,
+        CS_TRADE_CANCEL = 44,
+        SC_TRADE_CLOSED = 45
     }
     public struct PlayerStatsData
     {
@@ -267,6 +278,42 @@ public static class Protocol
         byte[] packet = new byte[HeaderSize];
         int offset = 0;
         WriteHeader(packet, ref offset, PacketType.CS_RANKING_REQUEST);
+        return packet;
+    }
+
+    public const int TradeMaxSlots = 8;
+
+    public static byte[] MakeEmptyPacket(PacketType type)
+    {
+        byte[] packet = new byte[HeaderSize];
+        int offset = 0;
+        WriteHeader(packet, ref offset, type);
+        return packet;
+    }
+
+    public static byte[] MakeTradeRespondPacket(bool accept)
+    {
+        byte[] packet = new byte[HeaderSize + 1];
+        int offset = 0;
+        WriteHeader(packet, ref offset, PacketType.CS_TRADE_RESPOND);
+        packet[offset] = (byte)(accept ? 1 : 0);
+        return packet;
+    }
+
+    // 올릴 칸 수(1) + 칸 번호 8개(8) + 해바라기씨(4). 안 쓰는 칸 번호 자리는 0으로 둔다.
+    public static byte[] MakeTradeOfferPacket(System.Collections.Generic.IList<int> slots, int gold)
+    {
+        byte[] packet = new byte[HeaderSize + 1 + TradeMaxSlots + 4];
+        int offset = 0;
+        WriteHeader(packet, ref offset, PacketType.CS_TRADE_OFFER);
+        int count = Math.Min(slots.Count, TradeMaxSlots);
+        packet[offset++] = (byte)count;
+        for (int i = 0; i < TradeMaxSlots; ++i)
+        {
+            packet[offset++] = (byte)(i < count ? slots[i] : 0);
+        }
+        byte[] goldBytes = BitConverter.GetBytes(gold);
+        Buffer.BlockCopy(goldBytes, 0, packet, offset, 4);
         return packet;
     }
 

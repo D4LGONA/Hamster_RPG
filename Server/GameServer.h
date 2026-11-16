@@ -77,6 +77,21 @@ private:
     void SendFurnitureFail(std::uint32_t playerId, std::uint8_t reason);
     // 서버 시작 때 DB에서 집과 가구를 불러와 메모리에 올린다.
     void LoadWorldFromDb();
+
+    // 2026-11-16: 1:1 거래 (GameServer_Trade.cpp)
+    using TradeCloseSends = std::vector<std::pair<std::uint32_t, SC_TRADE_CLOSED_PACKET>>;
+    void ProcessTradeRequest(std::uint32_t playerId);
+    void ProcessTradeRespond(std::uint32_t playerId, const CS_TRADE_RESPOND_PACKET* packet);
+    void ProcessTradeOffer(std::uint32_t playerId, const CS_TRADE_OFFER_PACKET* packet);
+    void ProcessTradeConfirm(std::uint32_t playerId);
+    void ProcessTradeCancel(std::uint32_t playerId);
+    // 거래를 닫고 두 사람에게 이유를 알린다(보낼 패킷은 sends에). playersLock 안에서.
+    void CloseTrade(std::uint32_t tradeId, std::uint8_t reasonA, std::uint8_t reasonB, TradeCloseSends& sends);
+    // 이 사람이 거래 중이면 닫는다(접속 종료, 집에 들어감). 상대에게는 reason 2. playersLock 안에서.
+    void CancelTradeOf(std::uint32_t playerId, TradeCloseSends& sends);
+    void UpdateTrades(float deltaSeconds, TradeCloseSends& sends);   // 틱: 신청 시간 초과, 너무 멀어짐
+    void FillTradeUpdate(std::uint32_t tradeId, std::uint32_t viewerId, SC_TRADE_UPDATE_PACKET& out);
+    void SendTradeClosed(const TradeCloseSends& sends);
     void SendInventory(std::uint32_t playerId, const SC_INVENTORY_PACKET& packet);
     // 처치 보상 + 드랍. ProcessAttack이 playersLock 안에서 부른다. 보낼 드랍 패킷은 dropSends에 모은다.
     void GrantKillRewards(Player& killer, const Monster& monster, bool& leveledUp,
@@ -385,6 +400,28 @@ private:
         std::vector<RankEntry> lastResult;
     };
     RaidState raid;
+
+    // 1:1 거래. playersLock으로 보호.
+    struct TradeOffer
+    {
+        std::vector<int> slots;                       // 올린 가방 칸
+        std::vector<InventorySlotData> snapshot;      // 올린 순간 그 칸의 내용(교환 직전에 그대로인지 다시 본다)
+        int gold = 0;
+        bool confirmed = false;
+    };
+    struct TradeSession
+    {
+        std::uint32_t a = 0;          // 신청한 사람
+        std::uint32_t b = 0;          // 신청받은 사람
+        bool open = false;            // b가 수락했나
+        float inviteTimer = 0.0f;     // 수락 대기 남은 시간
+        TradeOffer offer[2];          // [0] = a, [1] = b
+    };
+    std::unordered_map<std::uint32_t, TradeSession> trades;
+    std::uint32_t nextTradeId = 1;
+    static constexpr float TRADE_RANGE = 3.0f;          // 이만큼 가까이 있는 사람에게 신청
+    static constexpr float TRADE_KEEP_RANGE = 6.0f;     // 거래 중 이보다 멀어지면 취소
+    static constexpr float TRADE_INVITE_SEC = 15.0f;
 
     // 랭킹 스냅샷. 다 만든 목록을 통째로 바꿔 끼운다(원자적 교체). 읽는 쪽은 playersLock 없이 그 순간의 목록을 가져간다.
     // 쓰는 쪽: 레벨 = DB 스레드(또는 틱), 레이드 = 틱 스레드(정산할 때). 서로 다른 변수라 쓰기끼리도 안 겹친다.

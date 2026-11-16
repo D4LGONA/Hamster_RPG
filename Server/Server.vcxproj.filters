@@ -89,6 +89,9 @@
     <ClCompile Include="GameServer_Ranking.cpp">
       <Filter>소스 파일</Filter>
     </ClCompile>
+    <ClCompile Include="GameServer_Trade.cpp">
+      <Filter>소스 파일</Filter>
+    </ClCompile>
     <ClCompile Include="GameServer_Monster.cpp">
       <Filter>소스 파일</Filter>
     </ClCompile>

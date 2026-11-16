@@ -55,6 +55,7 @@ void GameServer::UpdateWorld(float deltaSeconds)
     std::vector<std::pair<std::uint32_t, SC_ZONE_CHANGE_PACKET>> zoneChangeSends;
     TickItemSends itemSends;   // 2026-11-13: 줍기/드랍 사라짐/몬스터에게 맞음/쓰러짐
     RaidSends raidSends;       // 2026-11-16: 월드 보스
+    TradeCloseSends tradeCloses;   // 2026-11-16: 거래 시간 초과/멀어짐
 
     {
         std::lock_guard<std::mutex> lock(playersLock);
@@ -216,6 +217,8 @@ void GameServer::UpdateWorld(float deltaSeconds)
 
         // 2026-11-16: 월드 보스(등장/내려찍기/정산/상태 방송). 내려찍기로 쓰러진 사람도 playerMovers로.
         UpdateRaid(deltaSeconds, playerMovers, monsterMovers, itemSends, raidSends);
+
+        UpdateTrades(deltaSeconds, tradeCloses);
 
         rankingTimer += deltaSeconds;
         if (rankingTimer >= RANKING_REFRESH_SEC)
@@ -553,6 +556,8 @@ void GameServer::UpdateWorld(float deltaSeconds)
     for (auto& [targetId, packet] : itemSends.removes)     { SendPacket(targetId, &packet, packet.size); }
     for (auto& [targetId, packet] : itemSends.pickups)     { SendPacket(targetId, &packet, packet.size); }
     for (auto& [targetId, packet] : itemSends.inventories) { SendInventory(targetId, packet); }
+
+    SendTradeClosed(tradeCloses);
 
     // 월드 보스
     for (const std::string& message : raidSends.announcements) { BroadcastAnnouncement(message); }

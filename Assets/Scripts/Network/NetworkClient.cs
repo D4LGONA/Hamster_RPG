@@ -358,6 +358,82 @@ public class NetworkClient : MonoBehaviour
         mainThreadActions.Enqueue(() => OnRanking?.Invoke(levelOut, raidOut));
     }
 
+    // ---------------- 2026-11-16: 1:1 거래 ----------------
+    public class TradeOffer
+    {
+        public InventorySlot[] items = new InventorySlot[0];
+        public int gold;
+        public bool confirmed;
+    }
+
+    public event System.Action<string> OnTradeInvite;     // 신청한 사람 이름
+    public event System.Action<string> OnTradeOpen;       // 상대 이름
+    public event System.Action<TradeOffer, TradeOffer> OnTradeUpdate;   // (내 것, 상대 것)
+    public event System.Action<int> OnTradeClosed;        // 이유
+
+    public void SendTradeRequest() { SendIfReady(Protocol.MakeEmptyPacket(Protocol.PacketType.CS_TRADE_REQUEST)); }
+    public void SendTradeRespond(bool accept) { SendIfReady(Protocol.MakeTradeRespondPacket(accept)); }
+    public void SendTradeOffer(System.Collections.Generic.IList<int> slots, int gold) { SendIfReady(Protocol.MakeTradeOfferPacket(slots, gold)); }
+    public void SendTradeConfirm() { SendIfReady(Protocol.MakeEmptyPacket(Protocol.PacketType.CS_TRADE_CONFIRM)); }
+    public void SendTradeCancel() { SendIfReady(Protocol.MakeEmptyPacket(Protocol.PacketType.CS_TRADE_CANCEL)); }
+
+    private void SendIfReady(byte[] packet)
+    {
+        if (isConnected && isLoggedIn && stream != null)
+        {
+            SendRaw(packet);
+        }
+    }
+
+    private void HandleTradeInvite(byte[] packet)
+    {
+        int offset = Protocol.HeaderSize;
+        Protocol.ReadUInt(packet, ref offset);
+        string name = Protocol.ReadFixedString(packet, ref offset, Protocol.NameSize);
+        mainThreadActions.Enqueue(() => OnTradeInvite?.Invoke(name));
+    }
+
+    private void HandleTradeOpen(byte[] packet)
+    {
+        int offset = Protocol.HeaderSize;
+        Protocol.ReadUInt(packet, ref offset);
+        string name = Protocol.ReadFixedString(packet, ref offset, Protocol.NameSize);
+        mainThreadActions.Enqueue(() => OnTradeOpen?.Invoke(name));
+    }
+
+    private static TradeOffer ReadTradeOffer(byte[] packet, ref int offset)
+    {
+        var offer = new TradeOffer();
+        int count = Protocol.ReadByte(packet, ref offset);
+        var items = new InventorySlot[Protocol.TradeMaxSlots];
+        for (int i = 0; i < items.Length; ++i)
+        {
+            items[i].itemId = Protocol.ReadUShort(packet, ref offset);
+            items[i].count = Protocol.ReadUShort(packet, ref offset);
+            items[i].enhance = Protocol.ReadByte(packet, ref offset);
+        }
+        offer.items = new InventorySlot[Mathf.Min(count, items.Length)];
+        System.Array.Copy(items, offer.items, offer.items.Length);
+        offer.gold = Protocol.ReadInt(packet, ref offset);
+        offer.confirmed = Protocol.ReadByte(packet, ref offset) == 1;
+        return offer;
+    }
+
+    private void HandleTradeUpdate(byte[] packet)
+    {
+        int offset = Protocol.HeaderSize;
+        TradeOffer mine = ReadTradeOffer(packet, ref offset);
+        TradeOffer theirs = ReadTradeOffer(packet, ref offset);
+        mainThreadActions.Enqueue(() => OnTradeUpdate?.Invoke(mine, theirs));
+    }
+
+    private void HandleTradeClosed(byte[] packet)
+    {
+        int offset = Protocol.HeaderSize;
+        int reason = Protocol.ReadByte(packet, ref offset);
+        mainThreadActions.Enqueue(() => OnTradeClosed?.Invoke(reason));
+    }
+
     public void SendEnhance()
     {
         if (isConnected == false || isLoggedIn == false || stream == null)
@@ -822,6 +898,18 @@ public class NetworkClient : MonoBehaviour
                 break;
             case Protocol.PacketType.SC_RANKING:
                 HandleRanking(packet);
+                break;
+            case Protocol.PacketType.SC_TRADE_INVITE:
+                HandleTradeInvite(packet);
+                break;
+            case Protocol.PacketType.SC_TRADE_OPEN:
+                HandleTradeOpen(packet);
+                break;
+            case Protocol.PacketType.SC_TRADE_UPDATE:
+                HandleTradeUpdate(packet);
+                break;
+            case Protocol.PacketType.SC_TRADE_CLOSED:
+                HandleTradeClosed(packet);
                 break;
             default:
                 mainThreadActions.Enqueue(() => Debug.LogWarning("[NETWORK] Unknown packet type: " + packetType));

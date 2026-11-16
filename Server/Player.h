@@ -74,6 +74,10 @@ public:
     std::chrono::steady_clock::time_point GetLastFurnitureRequest() const { return lastFurnitureRequest; }
     void SetLastFurnitureRequest(std::chrono::steady_clock::time_point t) { lastFurnitureRequest = t; }
 
+    // 2026-11-16: 거래 중이면 그 거래 id(신청 대기 포함). 0이면 거래 안 함.
+    std::uint32_t GetTradeId() const { return tradeId; }
+    void SetTradeId(std::uint32_t id) { tradeId = id; }
+
     bool IsPersistent() const { return persistent; }
     void SetPersistent(bool value) { persistent = value; }
 
@@ -90,6 +94,7 @@ private:
     Inventory inventory;
     bool persistent = false;
     std::chrono::steady_clock::time_point lastFurnitureRequest{};
+    std::uint32_t tradeId = 0;
 
     std::unordered_set<std::uint32_t> viewList;
 

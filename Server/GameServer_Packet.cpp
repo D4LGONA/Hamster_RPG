@@ -91,6 +91,31 @@ int GameServer::ProcessPacket(std::uint32_t playerId, const char* data, int byte
                 ProcessFurnitureMove(playerId, reinterpret_cast<const CS_FURNITURE_MOVE_PACKET*>(packetData));
             break;
 
+        case PACKET_TYPE::CS_TRADE_REQUEST:
+            if (packetSize == sizeof(CS_TRADE_REQUEST_PACKET))
+                ProcessTradeRequest(playerId);
+            break;
+
+        case PACKET_TYPE::CS_TRADE_RESPOND:
+            if (packetSize == sizeof(CS_TRADE_RESPOND_PACKET))
+                ProcessTradeRespond(playerId, reinterpret_cast<const CS_TRADE_RESPOND_PACKET*>(packetData));
+            break;
+
+        case PACKET_TYPE::CS_TRADE_OFFER:
+            if (packetSize == sizeof(CS_TRADE_OFFER_PACKET))
+                ProcessTradeOffer(playerId, reinterpret_cast<const CS_TRADE_OFFER_PACKET*>(packetData));
+            break;
+
+        case PACKET_TYPE::CS_TRADE_CONFIRM:
+            if (packetSize == sizeof(CS_TRADE_CONFIRM_PACKET))
+                ProcessTradeConfirm(playerId);
+            break;
+
+        case PACKET_TYPE::CS_TRADE_CANCEL:
+            if (packetSize == sizeof(CS_TRADE_CANCEL_PACKET))
+                ProcessTradeCancel(playerId);
+            break;
+
         case PACKET_TYPE::CS_RANKING_REQUEST:
             if (packetSize == sizeof(CS_RANKING_REQUEST_PACKET))
                 ProcessRankingRequest(playerId);
@@ -388,16 +413,19 @@ void GameServer::SaveAllPlayers(const char* reason)
 
     std::vector<CharacterData> batch;
 
-    {
-        std::lock_guard<std::mutex> lock(playersLock);
-        batch.reserve(players.size());
+    // 2026-11-16: 스냅샷을 뜨는 것과 DB 큐에 넣는 것을 같은 playersLock 안에서 한다.
+    // 락을 풀고 넣으면, 그 사이에 로그아웃/거래가 '더 새로운' 저장을 먼저 큐에 넣고 이 '옛날' 스냅샷이
+    // 뒤에 들어가서 DB를 과거로 되돌릴 수 있다(거래한 아이템이 DB에서 되살아나는 복사 버그).
+    // 큐에 들어간 순서 = 스냅샷을 뜬 순서가 되게 하면 DB 스레드가 하나라서 적용 순서도 같아진다.
+    // (락 순서: playersLock -> DbWorker 큐 락. DB 스레드는 큐 락을 쥔 채 playersLock을 잡지 않으므로 교착 없음)
+    std::lock_guard<std::mutex> lock(playersLock);
+    batch.reserve(players.size());
 
-        for (const auto& [id, player] : players)
+    for (const auto& [id, player] : players)
+    {
+        if (player.IsPersistent())
         {
-            if (player.IsPersistent())
-            {
-                batch.push_back(MakeSaveData(player));
-            }
+            batch.push_back(MakeSaveData(player));
         }
     }
 

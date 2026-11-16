@@ -20,7 +20,7 @@ using UnityEngine.EventSystems;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
-public class GameHUD : MonoBehaviour
+public partial class GameHUD : MonoBehaviour
 {
     // ---- 색 ----
     private static readonly Color Brown = new Color32(92, 62, 44, 255);
@@ -170,6 +170,7 @@ public class GameHUD : MonoBehaviour
         UpdateEnhanceWindow(net);
         UpdateRaidPanel(net);
         UpdateRankingToggle(net);
+        UpdateTrade(net);
         UpdateMinimap(net);
         UpdateToasts();
     }
@@ -215,6 +216,7 @@ public class GameHUD : MonoBehaviour
         BuildRaidPanel(canvasRect);
         BuildResultWindow(canvasRect);
         BuildRankingWindow(canvasRect);
+        BuildTradeWindows(canvasRect);
 
         NetworkClient net = NetworkClient.Instance;
         if (net != null)
@@ -236,6 +238,10 @@ public class GameHUD : MonoBehaviour
             net.OnEnhanceResult += OnEnhanceResult;
             net.OnRaidResult += ShowRaidResult;
             net.OnRanking += ShowRanking;
+            net.OnTradeInvite += ShowTradeInvite;
+            net.OnTradeOpen += OpenTrade;
+            net.OnTradeUpdate += ApplyTradeUpdate;
+            net.OnTradeClosed += CloseTradeWindow;
         }
 
         HideEmptySceneStatWindow();

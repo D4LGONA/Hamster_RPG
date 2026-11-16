@@ -92,6 +92,17 @@ enum class PACKET_TYPE : std::uint16_t
     SC_RAID_RESULT,        // 34  보스를 잡았을 때 참가자 각자에게: 순위/기여도/보상
     CS_RANKING_REQUEST,    // 35  랭킹 창 열 때
     SC_RANKING,            // 36  레벨 랭킹 + 지난 레이드 기여도
+
+    // 2026-11-16: 1:1 거래
+    CS_TRADE_REQUEST,      // 37  가까이 있는 사람에게 거래 신청
+    SC_TRADE_INVITE,       // 38  누가 거래를 신청했다
+    CS_TRADE_RESPOND,      // 39  수락 / 거절
+    SC_TRADE_OPEN,         // 40  거래창 열기(양쪽)
+    CS_TRADE_OFFER,        // 41  내가 올릴 칸들 + 해바라기씨
+    SC_TRADE_UPDATE,       // 42  양쪽이 올린 것 + 확인 여부
+    CS_TRADE_CONFIRM,      // 43  확인(양쪽 다 누르면 교환)
+    CS_TRADE_CANCEL,       // 44  취소
+    SC_TRADE_CLOSED,       // 45  끝남(성공/취소/실패 이유)
 };
 
 // 모든 패킷 맨 앞에 붙는 헤더(size + type)의 크기. 4바이트.
@@ -503,6 +514,78 @@ struct SC_RANKING_PACKET
     RankEntry raid[RANKING_COUNT];
 };
 
+// ==============================
+// 2026-11-16: 1:1 거래
+// ==============================
+constexpr int TRADE_MAX_SLOTS = 8;   // 한 번에 올릴 수 있는 가방 칸 수
+
+struct CS_TRADE_REQUEST_PACKET { std::uint16_t size; PACKET_TYPE type; };
+struct CS_TRADE_CONFIRM_PACKET { std::uint16_t size; PACKET_TYPE type; };
+struct CS_TRADE_CANCEL_PACKET  { std::uint16_t size; PACKET_TYPE type; };
+
+struct SC_TRADE_INVITE_PACKET
+{
+    std::uint16_t size;
+    PACKET_TYPE type;
+
+    std::uint32_t fromId;
+    char fromName[NAME_SIZE];
+};
+
+struct CS_TRADE_RESPOND_PACKET
+{
+    std::uint16_t size;
+    PACKET_TYPE type;
+
+    std::uint8_t accept;   // 1 수락 / 0 거절
+};
+
+struct SC_TRADE_OPEN_PACKET
+{
+    std::uint16_t size;
+    PACKET_TYPE type;
+
+    std::uint32_t partnerId;
+    char partnerName[NAME_SIZE];
+};
+
+struct CS_TRADE_OFFER_PACKET
+{
+    std::uint16_t size;
+    PACKET_TYPE type;
+
+    std::uint8_t slotCount;
+    std::uint8_t slots[TRADE_MAX_SLOTS];   // 내 가방 칸 번호(칸 통째로 올린다)
+    int gold;
+};
+
+struct TradeOfferData
+{
+    std::uint8_t count;
+    InventorySlotData items[TRADE_MAX_SLOTS];
+    int gold;
+    std::uint8_t confirmed;
+};
+
+struct SC_TRADE_UPDATE_PACKET
+{
+    std::uint16_t size;
+    PACKET_TYPE type;
+
+    TradeOfferData mine;
+    TradeOfferData theirs;
+};
+
+// 0 교환 완료 / 1 취소 / 2 상대가 나갔거나 멀어짐 / 3 올린 물건이 바뀜 / 4 가방 자리가 모자람
+// 5 거절했거나 응답 없음 / 6 근처에 거래할 사람이 없음(또는 거래 중)
+struct SC_TRADE_CLOSED_PACKET
+{
+    std::uint16_t size;
+    PACKET_TYPE type;
+
+    std::uint8_t reason;
+};
+
 struct SC_PLAYER_FAINT_PACKET
 {
     std::uint16_t size;
@@ -536,3 +619,10 @@ static_assert(sizeof(SC_RAID_STATUS_PACKET) == PACKET_HEADER_BYTES + 26 + RAID_T
 static_assert(sizeof(SC_RAID_SLAM_PACKET) == PACKET_HEADER_BYTES + 16, "SC_RAID_SLAM 크기 불일치");
 static_assert(sizeof(SC_RAID_RESULT_PACKET) == PACKET_HEADER_BYTES + 19, "SC_RAID_RESULT 크기 불일치");
 static_assert(sizeof(SC_RANKING_PACKET) == PACKET_HEADER_BYTES + 2 + RANKING_COUNT * 28 * 2, "SC_RANKING 크기 불일치");
+static_assert(sizeof(SC_TRADE_INVITE_PACKET) == PACKET_HEADER_BYTES + 4 + NAME_SIZE, "SC_TRADE_INVITE 크기 불일치");
+static_assert(sizeof(CS_TRADE_RESPOND_PACKET) == PACKET_HEADER_BYTES + 1, "CS_TRADE_RESPOND 크기 불일치");
+static_assert(sizeof(SC_TRADE_OPEN_PACKET) == PACKET_HEADER_BYTES + 4 + NAME_SIZE, "SC_TRADE_OPEN 크기 불일치");
+static_assert(sizeof(CS_TRADE_OFFER_PACKET) == PACKET_HEADER_BYTES + 1 + TRADE_MAX_SLOTS + 4, "CS_TRADE_OFFER 크기 불일치");
+static_assert(sizeof(TradeOfferData) == 1 + TRADE_MAX_SLOTS * 5 + 4 + 1, "TradeOfferData 크기 불일치");
+static_assert(sizeof(SC_TRADE_UPDATE_PACKET) == PACKET_HEADER_BYTES + 2 * sizeof(TradeOfferData), "SC_TRADE_UPDATE 크기 불일치");
+static_assert(sizeof(SC_TRADE_CLOSED_PACKET) == PACKET_HEADER_BYTES + 1, "SC_TRADE_CLOSED 크기 불일치");

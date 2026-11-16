@@ -192,6 +192,45 @@ public:
         slots[index] = InventorySlotData{ itemId, count, static_cast<std::uint8_t>(enhance) };
     }
 
+    // 2026-11-16: 거래용. 칸을 통째로 빼서 돌려준다(장착 중이던 칸이면 맨손이 된다).
+    InventorySlotData TakeSlot(int index)
+    {
+        InventorySlotData taken = slots[index];
+        slots[index] = InventorySlotData{ 0, 0, 0 };
+
+        if (equippedSlot == index)
+        {
+            equippedSlot = -1;
+        }
+        return taken;
+    }
+
+    // 2026-11-16: 거래로 받은 칸을 넣는다. 무기는 강화 수치를 그대로 지닌 채 빈 칸에, 나머지는 쌓기 규칙대로.
+    bool TryAddSlot(const InventorySlotData& item)
+    {
+        const ItemDef* def = Items::Find(item.itemId);
+
+        if (def == nullptr || item.count == 0)
+        {
+            return false;
+        }
+
+        if (def->type != ItemType::Weapon)
+        {
+            return TryAdd(item.itemId, item.count);
+        }
+
+        for (InventorySlotData& slot : slots)
+        {
+            if (slot.itemId == 0)
+            {
+                slot = item;
+                return true;
+            }
+        }
+        return false;
+    }
+
     // 장착한 무기의 강화 수치를 1 올린다(성공 처리). 장착한 무기가 없으면 false.
     bool RaiseEquippedEnhance()
     {

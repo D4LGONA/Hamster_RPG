@@ -96,6 +96,12 @@ void GameServer::ProcessUseItem(std::uint32_t playerId, const CS_USE_ITEM_PACKET
         }
 
         Player& player = iter->second;
+
+        if (player.GetTradeId() != 0)
+        {
+            return;   // 거래 중엔 가방을 못 쓴다(올려 둔 아이템을 먹거나 바꿔 끼우는 복사 시도 차단)
+        }
+
         Inventory& inventory = player.GetInventory();
         const InventorySlotData slot = inventory.GetSlot(index);
         const ItemDef* def = Items::Find(slot.itemId);
@@ -163,7 +169,7 @@ void GameServer::UpdateGroundDrops(float deltaSeconds, TickItemSends& sends)
         {
             Player& owner = ownerIter->second;
 
-            if (owner.GetZoneId() == 0 &&
+            if (owner.GetZoneId() == 0 && owner.GetTradeId() == 0 &&   // 거래 중엔 줍지 않는다(가방이 바뀌면 교환 검사가 깨진다)
                 WithinRadius(owner.GetX(), owner.GetY(), drop.x, drop.y, DROP_PICKUP_RADIUS) &&
                 owner.GetInventory().TryAdd(drop.itemId, drop.count))   // 가방이 꽉 찼으면 바닥에 남는다
             {
@@ -329,6 +335,12 @@ void GameServer::ProcessEnhance(std::uint32_t playerId)
         }
 
         Player& player = iter->second;
+
+        if (player.GetTradeId() != 0)
+        {
+            return;   // 거래 중엔 강화 금지(골드/무기가 거래에 올라가 있을 수 있다)
+        }
+
         Inventory& inventory = player.GetInventory();
         PlayerStats& s = player.GetStats();
         const int level = inventory.GetEquippedEnhance();

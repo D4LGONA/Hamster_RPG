@@ -318,10 +318,9 @@ void GameServer::BroadcastPacket(const void* packet, int size, std::uint32_t exc
 
 void GameServer::DisconnectPlayer(std::uint32_t playerId)
 {
+    TradeCloseSends tradeCloses;
     bool existed = false;
     std::vector<std::uint32_t> viewers;   // 나를 시야에 두고 있던 사람들
-    bool needSave = false;
-    CharacterData saveData;
 
     {
         std::lock_guard<std::mutex> lock(playersLock);
@@ -329,17 +328,29 @@ void GameServer::DisconnectPlayer(std::uint32_t playerId)
         // DB에서 불러오는 중에 끊겼다. CompleteLogin이 이걸 보고 월드에 넣지 않는다.
         pendingLogins.erase(playerId);
 
+        // 거래 중이었으면 닫는다(상대에게는 '상대가 나감')
+        CancelTradeOf(playerId, tradeCloses);
+
         auto iter = players.find(playerId);
 
         if (iter != players.end())
         {
             Player& me = iter->second;
 
-            // 지우기 전에 저장할 값을 떠 둔다. 실제 저장은 DB 스레드가 한다(락 밖에서 Post).
-            if (me.IsPersistent())
+            // 지우기 전에 저장할 값을 떠서 바로 DB 큐에 넣는다. 락 안에서 넣어야 자동 저장과 순서가 뒤집히지 않는다
+            // (SaveAllPlayers 주석 참고).
+            if (me.IsPersistent() && dbWorker.IsEnabled())
             {
-                saveData = MakeSaveData(me);
-                needSave = true;
+                CharacterData saveData = MakeSaveData(me);
+                dbWorker.Post([saveData](Database& db)
+                {
+                    std::vector<CharacterData> one{ saveData };
+
+                    if (db.SaveCharacters(one) == false)
+                    {
+                        std::cout << "[DB] logout save failed for " << saveData.name << ": " << db.GetLastError() << std::endl;
+                    }
+                });
             }
 
             // 섹터 격자에서 제거
@@ -403,18 +414,7 @@ void GameServer::DisconnectPlayer(std::uint32_t playerId)
         }
     }
 
-    if (needSave && dbWorker.IsEnabled())
-    {
-        dbWorker.Post([saveData](Database& db)
-        {
-            std::vector<CharacterData> one{ saveData };
-
-            if (db.SaveCharacters(one) == false)
-            {
-                std::cout << "[DB] logout save failed for " << saveData.name << ": " << db.GetLastError() << std::endl;
-            }
-        });
-    }
+    SendTradeClosed(tradeCloses);
 
     if (existed == false)
     {
