@@ -13,8 +13,13 @@ public static class WorldGen
     public const int BossMinDistance = 48;
     public const uint BossChance = 30;
 
+    // 2026-11-16: 월드 보스 경기장(서버 WorldGen.h와 같게)
+    public const int ArenaX = 0;
+    public const int ArenaY = 48;
+    public const int ArenaRadiusTiles = 10;
+
     public enum Obstacle : byte { None = 0, Tree = 1, Bush = 2, Rock = 3 }
-    public enum MonsterKind : byte { Caterpillar = 0, Ladybug = 1, CatBoss = 2 }
+    public enum MonsterKind : byte { Caterpillar = 0, Ladybug = 1, CatBoss = 2, WorldBoss = 3 }
 
     public struct ObstacleSpot { public int TileX; public int TileY; public Obstacle Kind; }
     public struct MonsterSpot { public float X; public float Y; public MonsterKind Kind; }
@@ -46,7 +51,12 @@ public static class WorldGen
 
     public static bool InSafeZone(int tileX, int tileY)
     {
-        return Math.Abs(tileX) <= SafeRadiusTiles && Math.Abs(tileY) <= SafeRadiusTiles;
+        if (Math.Abs(tileX) <= SafeRadiusTiles && Math.Abs(tileY) <= SafeRadiusTiles)
+        {
+            return true;
+        }
+
+        return Math.Abs(tileX - ArenaX) <= ArenaRadiusTiles && Math.Abs(tileY - ArenaY) <= ArenaRadiusTiles;
     }
 
     public static void ObstaclesInChunk(int chunkX, int chunkY, List<ObstacleSpot> output)

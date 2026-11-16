@@ -54,6 +54,7 @@ void GameServer::UpdateWorld(float deltaSeconds)
     std::vector<std::pair<std::uint32_t, SC_DESPAWN_PACKET>> despawnSends;
     std::vector<std::pair<std::uint32_t, SC_ZONE_CHANGE_PACKET>> zoneChangeSends;
     TickItemSends itemSends;   // 2026-11-13: 줍기/드랍 사라짐/몬스터에게 맞음/쓰러짐
+    RaidSends raidSends;       // 2026-11-16: 월드 보스
 
     {
         std::lock_guard<std::mutex> lock(playersLock);
@@ -212,6 +213,16 @@ void GameServer::UpdateWorld(float deltaSeconds)
         // (아래 3) 시야 diff보다 먼저여야 순간이동한 자리 기준으로 주변이 다시 계산된다).
         UpdateMonsterAttacks(deltaSeconds, playerMovers, itemSends);
         UpdateGroundDrops(deltaSeconds, itemSends);
+
+        // 2026-11-16: 월드 보스(등장/내려찍기/정산/상태 방송). 내려찍기로 쓰러진 사람도 playerMovers로.
+        UpdateRaid(deltaSeconds, playerMovers, monsterMovers, itemSends, raidSends);
+
+        rankingTimer += deltaSeconds;
+        if (rankingTimer >= RANKING_REFRESH_SEC)
+        {
+            rankingTimer = 0.0f;
+            RefreshLevelRanking();
+        }
 
         t2 = profClock::now();
 
@@ -542,6 +553,17 @@ void GameServer::UpdateWorld(float deltaSeconds)
     for (auto& [targetId, packet] : itemSends.removes)     { SendPacket(targetId, &packet, packet.size); }
     for (auto& [targetId, packet] : itemSends.pickups)     { SendPacket(targetId, &packet, packet.size); }
     for (auto& [targetId, packet] : itemSends.inventories) { SendInventory(targetId, packet); }
+
+    // 월드 보스
+    for (const std::string& message : raidSends.announcements) { BroadcastAnnouncement(message); }
+    for (std::uint32_t targetId : raidSends.slamTargets)      { SendPacket(targetId, &raidSends.slam, raidSends.slam.size); }
+    for (auto& [targetId, packet] : raidSends.results)        { SendPacket(targetId, &packet, packet.size); }
+    for (auto& [targetId, packet] : raidSends.inventories)    { SendInventory(targetId, packet); }
+    for (auto& [targetId, stats] : raidSends.stats)           { SendStatUpdate(targetId, stats); }
+    if (raidSends.sendStatus)
+    {
+        for (std::uint32_t targetId : raidSends.statusTargets) { SendPacket(targetId, &raidSends.status, raidSends.status.size); }
+    }
 
     if (profileEnabled)
     {

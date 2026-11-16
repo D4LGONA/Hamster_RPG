@@ -1,4 +1,4 @@
--- 2026-11-13: 집 / 가구 저장 프로시저. 01_schema.sql(테이블) 다음에 실행. 여러 번 실행해도 안전.
+-- 2026-11-13: 집 / 가구 저장 프로시저. (2026-11-16: 레벨 랭킹 추가) 01_schema.sql(테이블) 다음에 실행. 여러 번 실행해도 안전.
 --
 -- id는 서버가 정해서 넣는다. 서버 메모리 id = 대역(집 1,000,000 / 가구 3,000,000) + DB id.
 -- 서버가 시작할 때 sp_world_load로 전부 읽고, 가장 큰 id 다음부터 새 id를 준다.
@@ -46,6 +46,29 @@ DELIMITER //
 CREATE PROCEDURE sp_furniture_delete(IN p_furniture_id BIGINT UNSIGNED)
 BEGIN
     DELETE FROM furniture WHERE furniture_id = p_furniture_id;
+END //
+DELIMITER ;
+
+-- 2026-11-16: 레벨 랭킹 (레벨 높은 순, 같으면 경험치 많은 순). 서버가 30초마다 부른다.
+-- 레벨/경험치로 정렬하므로 인덱스를 둔다(캐릭터가 많아져도 전체 정렬을 피하려고).
+DROP PROCEDURE IF EXISTS sp_add_ranking_index;
+DELIMITER //
+CREATE PROCEDURE sp_add_ranking_index()
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.STATISTICS
+                    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'player_character' AND INDEX_NAME = 'idx_character_rank') THEN
+        CREATE INDEX idx_character_rank ON player_character (level DESC, exp DESC);
+    END IF;
+END //
+DELIMITER ;
+CALL sp_add_ranking_index();
+DROP PROCEDURE sp_add_ranking_index;
+
+DROP PROCEDURE IF EXISTS sp_ranking_level;
+DELIMITER //
+CREATE PROCEDURE sp_ranking_level(IN p_limit INT)
+BEGIN
+    SELECT name, level, exp FROM player_character ORDER BY level DESC, exp DESC LIMIT p_limit;
 END //
 DELIMITER ;
 

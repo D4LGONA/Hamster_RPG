@@ -47,6 +47,7 @@ public:
 
     int GetAttack() const { return attack; }
     int GetDefense() const { return defense; }
+    void SetDefense(int value) { defense = value; }   // 2026-11-16: 월드 보스용
     void SetCombatStats(int newAttack, int newDefense) { attack = newAttack; defense = newDefense; }
 
     // 죽으면 리스폰 타이머가 돌고, 다 되면 집에서 hp를 채워 되살아난다.

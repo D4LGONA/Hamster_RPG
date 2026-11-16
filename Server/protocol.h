@@ -85,6 +85,13 @@ enum class PACKET_TYPE : std::uint16_t
     SC_FURNITURE_MOVED,    // 29
     SC_FURNITURE_REMOVED,  // 30
     SC_FURNITURE_RESULT,   // 31  실패했을 때 요청자에게만
+
+    // 2026-11-16: 월드 보스 레이드 / 랭킹
+    SC_RAID_STATUS,        // 32  1초마다 전원에게: 보스 상태 + 기여도 상위 5명
+    SC_RAID_SLAM,          // 33  보스 내려찍기 예고(이 원 안에 있으면 곧 맞는다)
+    SC_RAID_RESULT,        // 34  보스를 잡았을 때 참가자 각자에게: 순위/기여도/보상
+    CS_RANKING_REQUEST,    // 35  랭킹 창 열 때
+    SC_RANKING,            // 36  레벨 랭킹 + 지난 레이드 기여도
 };
 
 // 모든 패킷 맨 앞에 붙는 헤더(size + type)의 크기. 4바이트.
@@ -424,6 +431,78 @@ struct SC_FURNITURE_RESULT_PACKET
     std::uint8_t reason;
 };
 
+// ==============================
+// 2026-11-16: 월드 보스 레이드 / 랭킹
+// ==============================
+constexpr int RAID_TOP_COUNT = 5;
+constexpr int RANKING_COUNT = 10;
+
+struct RankEntry
+{
+    char name[NAME_SIZE];
+    int value;   // 레이드: 넣은 피해량 / 레벨 랭킹: 레벨
+    int extra;   // 레이드: 기여도(천분율) / 레벨 랭킹: 경험치
+};
+
+struct SC_RAID_STATUS_PACKET
+{
+    std::uint16_t size;
+    PACKET_TYPE type;
+
+    std::uint8_t state;            // 0 기다리는 중 / 1 보스 있음
+    std::uint8_t topCount;         // top에 채운 수
+    std::uint16_t secondsToSpawn;  // state 0일 때 다음 등장까지
+    std::uint16_t participants;    // 지금까지 때린 사람 수
+    std::uint32_t bossId;
+    int hp;
+    int maxHp;
+    float x;
+    float y;
+    RankEntry top[RAID_TOP_COUNT];
+};
+
+struct SC_RAID_SLAM_PACKET
+{
+    std::uint16_t size;
+    PACKET_TYPE type;
+
+    float x;
+    float y;
+    float radius;
+    float delay;   // 이만큼 뒤에 피해가 들어간다(그 안에 원 밖으로 나가면 안 맞는다)
+};
+
+struct SC_RAID_RESULT_PACKET
+{
+    std::uint16_t size;
+    PACKET_TYPE type;
+
+    std::uint16_t rank;           // 1부터
+    std::uint16_t participants;
+    std::uint16_t sharePermille;  // 기여도(천분율)
+    std::uint8_t gotClaw;         // 고양이 발톱을 받았나(상위 3명)
+    int damage;
+    int gold;
+    int exp;
+};
+
+struct CS_RANKING_REQUEST_PACKET
+{
+    std::uint16_t size;
+    PACKET_TYPE type;
+};
+
+struct SC_RANKING_PACKET
+{
+    std::uint16_t size;
+    PACKET_TYPE type;
+
+    std::uint8_t levelCount;
+    std::uint8_t raidCount;
+    RankEntry level[RANKING_COUNT];
+    RankEntry raid[RANKING_COUNT];
+};
+
 struct SC_PLAYER_FAINT_PACKET
 {
     std::uint16_t size;
@@ -452,3 +531,8 @@ static_assert(sizeof(SC_FURNITURE_SPAWN_PACKET) == PACKET_HEADER_BYTES + 14, "SC
 static_assert(sizeof(SC_FURNITURE_MOVED_PACKET) == PACKET_HEADER_BYTES + 13, "SC_FURNITURE_MOVED 크기 불일치");
 static_assert(sizeof(SC_FURNITURE_REMOVED_PACKET) == PACKET_HEADER_BYTES + 4, "SC_FURNITURE_REMOVED 크기 불일치");
 static_assert(sizeof(SC_FURNITURE_RESULT_PACKET) == PACKET_HEADER_BYTES + 1, "SC_FURNITURE_RESULT 크기 불일치");
+static_assert(sizeof(RankEntry) == NAME_SIZE + 8, "RankEntry 크기 불일치");
+static_assert(sizeof(SC_RAID_STATUS_PACKET) == PACKET_HEADER_BYTES + 26 + RAID_TOP_COUNT * 28, "SC_RAID_STATUS 크기 불일치");
+static_assert(sizeof(SC_RAID_SLAM_PACKET) == PACKET_HEADER_BYTES + 16, "SC_RAID_SLAM 크기 불일치");
+static_assert(sizeof(SC_RAID_RESULT_PACKET) == PACKET_HEADER_BYTES + 19, "SC_RAID_RESULT 크기 불일치");
+static_assert(sizeof(SC_RANKING_PACKET) == PACKET_HEADER_BYTES + 2 + RANKING_COUNT * 28 * 2, "SC_RANKING 크기 불일치");

@@ -26,8 +26,13 @@ namespace WorldGen
     constexpr int BOSS_MIN_DISTANCE = 48;      // 보스는 원점에서 이만큼은 떨어진 곳에만
     constexpr std::uint32_t BOSS_CHANCE = 30;   // 조건을 만족하는 청크 중 1/30
 
+    // 2026-11-16: 월드 보스(왕 고양이) 경기장. 광장 북쪽. 이 안에는 장애물/일반 몬스터를 두지 않는다.
+    constexpr int ARENA_X = 0;
+    constexpr int ARENA_Y = 48;
+    constexpr int ARENA_RADIUS_TILES = 10;
+
     enum class Obstacle : std::uint8_t { None = 0, Tree = 1, Bush = 2, Rock = 3 };
-    enum class MonsterKind : std::uint8_t { Caterpillar = 0, Ladybug = 1, CatBoss = 2 };
+    enum class MonsterKind : std::uint8_t { Caterpillar = 0, Ladybug = 1, CatBoss = 2, WorldBoss = 3 };   // WorldBoss는 생성 공식이 아니라 레이드가 만든다
 
     struct ObstacleSpot { int tileX; int tileY; Obstacle kind; };
     struct MonsterSpot { float x; float y; MonsterKind kind; };
@@ -57,7 +62,13 @@ namespace WorldGen
 
     inline bool InSafeZone(int tileX, int tileY)
     {
-        return std::abs(tileX) <= SAFE_RADIUS_TILES && std::abs(tileY) <= SAFE_RADIUS_TILES;
+        if (std::abs(tileX) <= SAFE_RADIUS_TILES && std::abs(tileY) <= SAFE_RADIUS_TILES)
+        {
+            return true;
+        }
+
+        // 경기장(정사각형 근사. 원보다 계산이 단순하고 C#과 결과를 맞추기 쉽다)
+        return std::abs(tileX - ARENA_X) <= ARENA_RADIUS_TILES && std::abs(tileY - ARENA_Y) <= ARENA_RADIUS_TILES;
     }
 
     // 청크 하나의 장애물. 2~5개. 청크 가장자리 한 줄은 비워서 이웃 청크와 붙어 벽이 되지 않게 한다.

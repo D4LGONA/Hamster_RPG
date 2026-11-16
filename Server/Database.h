@@ -84,6 +84,10 @@ public:
     bool SaveFurniture(const DbFurnitureRow& row);   // 없으면 넣고 있으면 고친다
     bool DeleteFurniture(std::uint64_t furnitureId);
 
+    // 2026-11-16: 레벨 랭킹 상위 N명 (이름, 레벨, 경험치)
+    struct LevelRankRow { std::string name; int level; int exp; };
+    bool LoadLevelRanking(int limit, std::vector<LevelRankRow>& out);
+
     const std::string& GetLastError() const { return lastError; }
 
 private:

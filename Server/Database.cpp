@@ -610,6 +610,71 @@ bool Database::TryLoadWorld(std::vector<DbHouseRow>& housesOut, std::vector<DbFu
     return ok;
 }
 
+bool Database::LoadLevelRanking(int limit, std::vector<LevelRankRow>& out)
+{
+    for (int attempt = 0; attempt < 2; ++attempt)
+    {
+        if (dbc == nullptr)
+        {
+            return false;
+        }
+
+        out.clear();
+        SQLHSTMT stmt = SQL_NULL_HSTMT;
+
+        if (Ok(SQLAllocHandle(SQL_HANDLE_STMT, static_cast<SQLHDBC>(dbc), &stmt)) == false)
+        {
+            RecordError(SQL_HANDLE_DBC, dbc, "ranking alloc");
+            return false;
+        }
+
+        SQLINTEGER limitParam = limit;
+        bool ok = Ok(ODBC_PREPARE(stmt, reinterpret_cast<SQLCHAR*>(const_cast<char*>("{CALL sp_ranking_level(?)}")), SQL_NTS)) &&
+                  Ok(SQLBindParameter(stmt, 1, SQL_PARAM_INPUT, SQL_C_SLONG, SQL_INTEGER, 0, 0, &limitParam, 0, nullptr)) &&
+                  Ok(SQLExecute(stmt));
+
+        if (ok)
+        {
+            SQLSMALLINT columns = 0;
+            SQLNumResultCols(stmt, &columns);
+            SQLLEN ind = 0;
+
+            while (columns >= 3 && Ok(SQLFetch(stmt)))
+            {
+                char16_t name[32] = {};
+                SQLLEN nameLen = 0;
+                SQLINTEGER level = 0, exp = 0;
+                SQLGetData(stmt, 1, SQL_C_WCHAR, name, sizeof(name), &nameLen);
+                SQLGetData(stmt, 2, SQL_C_SLONG, &level, 0, &ind);
+                SQLGetData(stmt, 3, SQL_C_SLONG, &exp, 0, &ind);
+
+                std::size_t chars = nameLen > 0 ? static_cast<std::size_t>(nameLen) / sizeof(char16_t) : 0;
+                if (chars > 31) { chars = 31; }
+                out.push_back({ Utf16ToUtf8(name, chars), level, exp });
+            }
+        }
+        else
+        {
+            RecordError(SQL_HANDLE_STMT, stmt, "ranking");
+        }
+
+        DrainResults(stmt);
+        SQLFreeHandle(SQL_HANDLE_STMT, stmt);
+
+        if (ok)
+        {
+            return true;
+        }
+
+        if (attempt == 0 && ReconnectIfDead() == false)
+        {
+            return false;
+        }
+    }
+
+    return false;
+}
+
 // ---------------------------------------------------------------- DbWorker
 
 bool DbWorker::Start(const std::string& connectionString)

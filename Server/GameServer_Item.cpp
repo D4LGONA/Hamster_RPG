@@ -19,6 +19,7 @@ namespace
         case WorldGen::MonsterKind::Caterpillar: return { 20, 10, 0 };   // 순둥: 물지 않는다
         case WorldGen::MonsterKind::Ladybug:     return { 35, 15, 8 };
         case WorldGen::MonsterKind::CatBoss:     return { 400, 200, 20 };
+        case WorldGen::MonsterKind::WorldBoss:   return { 0, 0, 25 };   // 처치 보상은 기여도대로(GameServer_Raid.cpp)
         }
         return { 20, 10, 5 };
     }
@@ -40,6 +41,11 @@ void GameServer::GrantKillRewards(Player& killer, const Monster& monster, bool& 
 
     std::uniform_int_distribution<int> percent(1, 100);
     std::uniform_real_distribution<float> scatter(-0.6f, 0.6f);
+
+    if (monster.GetKind() == WorldGen::MonsterKind::WorldBoss)
+    {
+        return;   // 월드 보스는 막타가 아니라 기여도로 나눠 준다
+    }
 
     Items::ForEachDropRule(monster.GetKind(), [&](const Items::DropRule& rule)
     {
@@ -270,41 +276,7 @@ void GameServer::UpdateMonsterAttacks(float deltaSeconds, std::vector<std::uint3
             continue;
         }
 
-        // 쓰러짐: 골드 10% 잃고, HP 가득 채워 광장으로
-        const int goldLost = static_cast<int>(s.gold * FAINT_GOLD_LOSS);
-        s.gold -= goldLost;
-        s.hp = s.maxHp;
-
-        float spawnX = 0.0f;
-        float spawnY = 0.0f;
-        PickSpawnPosition(spawnX, spawnY);
-
-        const float oldX = target.GetX();
-        const float oldY = target.GetY();
-        target.SetPosition(spawnX, spawnY);
-        target.SetInput(0.0f, 0.0f);
-        sectorGrid.Move(targetId, oldX, oldY, spawnX, spawnY);
-
-        if (std::find(playerMovers.begin(), playerMovers.end(), targetId) == playerMovers.end())
-        {
-            playerMovers.push_back(targetId);
-        }
-
-        // 나를 쫓던 몬스터들은 놓아준다
-        for (auto& [otherId, other] : monsters)
-        {
-            if (other.GetTargetId() == targetId)
-            {
-                other.SetTargetId(0);
-                other.SetAggroTimer(0.0f);
-            }
-        }
-
-        SC_PLAYER_FAINT_PACKET faint{};
-        faint.size = sizeof(SC_PLAYER_FAINT_PACKET);
-        faint.type = PACKET_TYPE::SC_PLAYER_FAINT;
-        faint.goldLost = goldLost;
-        sends.faints.emplace_back(targetId, faint);
+        KnockOut(targetId, target, playerMovers, sends);
     }
 
     for (std::uint32_t playerId : hurt)
@@ -415,4 +387,44 @@ void GameServer::ProcessEnhance(std::uint32_t playerId)
         SendInventory(playerId, inventoryPacket);
         SendStatUpdate(playerId, stats);
     }
+}
+
+// 쓰러짐: 골드 10%를 잃고, HP를 가득 채워 광장으로. 쫓던 몬스터들은 놓아준다.
+// 광장으로 옮긴 플레이어는 playerMovers에 넣어, 뒤이은 시야 diff가 주변을 새로 계산하게 한다.
+void GameServer::KnockOut(std::uint32_t playerId, Player& target, std::vector<std::uint32_t>& playerMovers, TickItemSends& sends)
+{
+    PlayerStats& s = target.GetStats();
+    const int goldLost = static_cast<int>(s.gold * FAINT_GOLD_LOSS);
+    s.gold -= goldLost;
+    s.hp = s.maxHp;
+
+    float spawnX = 0.0f;
+    float spawnY = 0.0f;
+    PickSpawnPosition(spawnX, spawnY);
+
+    const float oldX = target.GetX();
+    const float oldY = target.GetY();
+    target.SetPosition(spawnX, spawnY);
+    target.SetInput(0.0f, 0.0f);
+    sectorGrid.Move(playerId, oldX, oldY, spawnX, spawnY);
+
+    if (std::find(playerMovers.begin(), playerMovers.end(), playerId) == playerMovers.end())
+    {
+        playerMovers.push_back(playerId);
+    }
+
+    for (auto& [otherId, other] : monsters)
+    {
+        if (other.GetTargetId() == playerId)
+        {
+            other.SetTargetId(0);
+            other.SetAggroTimer(0.0f);
+        }
+    }
+
+    SC_PLAYER_FAINT_PACKET faint{};
+    faint.size = sizeof(SC_PLAYER_FAINT_PACKET);
+    faint.type = PACKET_TYPE::SC_PLAYER_FAINT;
+    faint.goldLost = goldLost;
+    sends.faints.emplace_back(playerId, faint);
 }

@@ -76,7 +76,14 @@ void GameServer::ProcessAttack(std::uint32_t playerId, const CS_ATTACK_PACKET* p
                 damage = 1;   // 방어력이 높아도 최소 1은 들어가게(안 그러면 영영 못 잡는다)
             }
 
+            const int hpBefore = monster.GetHp();
             monster.TakeDamage(damage);
+
+            // 2026-11-16: 월드 보스면 기여도에 실제로 깎인 만큼 더한다(남은 HP보다 큰 피해는 남은 만큼만).
+            if (monster.GetKind() == WorldGen::MonsterKind::WorldBoss)
+            {
+                RecordRaidDamage(attacker.GetName(), hpBefore - (monster.GetHp() > 0 ? monster.GetHp() : 0));
+            }
 
             SC_DAMAGE_PACKET damagePacket{};
             damagePacket.size = sizeof(SC_DAMAGE_PACKET);
@@ -120,6 +127,14 @@ void GameServer::ProcessAttack(std::uint32_t playerId, const CS_ATTACK_PACKET* p
 
                 // 경험치/골드/드랍. 한 번 휘둘러 여러 마리를 잡으면 레벨이 두 번 오를 수도 있다
                 GrantKillRewards(attacker, monster, leveledUp, dropSends);
+
+                // 월드 보스: 여기서는 '쓰러졌다'는 표시만. 보상은 다음 틱 UpdateRaid가 정확히 한 번 나눈다.
+                // 여러 워커가 같은 순간 막타를 쳐도 playersLock 안에서 IsAlive가 한 번만 false로 바뀌므로
+                // 이 줄에 들어오는 건 한 명뿐이다.
+                if (monster.GetKind() == WorldGen::MonsterKind::WorldBoss)
+                {
+                    raid.bossDown = true;
+                }
             }
         }
 

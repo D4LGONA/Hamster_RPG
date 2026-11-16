@@ -93,6 +93,32 @@ private:
     void ClearDropsOf(std::uint32_t ownerId);
     std::uint32_t FindNearestPlayer(float x, float y, float radius);   // playersLock 안에서   // playersLock 안에서. 집에 들어갈 때
     void UpdateMonsterAttacks(float deltaSeconds, std::vector<std::uint32_t>& playerMovers, TickItemSends& sends);
+    // HP가 0이 된 플레이어: 골드 10% 잃고 HP 채워 광장으로(순간이동도 이동이라 playerMovers에 넣는다). playersLock 안에서.
+    void KnockOut(std::uint32_t playerId, Player& player, std::vector<std::uint32_t>& playerMovers, TickItemSends& sends);
+
+    // 2026-11-16: 월드 보스 레이드 (GameServer_Raid.cpp). 전부 playersLock 안에서.
+    struct RaidSends
+    {
+        std::vector<std::uint32_t> statusTargets;      // 상태 패킷 받을 사람(전원)
+        SC_RAID_STATUS_PACKET status{};
+        bool sendStatus = false;
+        std::vector<std::uint32_t> slamTargets;
+        SC_RAID_SLAM_PACKET slam{};
+        std::vector<std::pair<std::uint32_t, SC_RAID_RESULT_PACKET>> results;
+        std::vector<std::pair<std::uint32_t, SC_INVENTORY_PACKET>> inventories;
+        std::vector<std::pair<std::uint32_t, PlayerStats>> stats;
+        std::vector<std::string> announcements;        // 전원 채팅 알림
+    };
+    void UpdateRaid(float deltaSeconds, std::vector<std::uint32_t>& playerMovers,
+                    std::vector<std::uint32_t>& monsterMovers, TickItemSends& itemSends, RaidSends& raidSends);
+    void SpawnRaidBoss(std::vector<std::uint32_t>& monsterMovers, RaidSends& raidSends);
+    void FinishRaid(RaidSends& raidSends);
+    void RecordRaidDamage(const std::string& playerName, int damage);
+    void BroadcastAnnouncement(const std::string& message);   // 락 밖에서. 이름이 "알림"인 채팅
+
+    // 2026-11-16: 랭킹 (GameServer_Ranking.cpp)
+    void ProcessRankingRequest(std::uint32_t playerId);
+    void RefreshLevelRanking();   // 틱에서 30초마다. playersLock 안에서 불러도 된다(DB면 DB 스레드에 맡기기만 함)
 public:
     // 종료 직전 저장. 남은 DB 작업을 다 끝낼 때까지 기다린다(main.cpp 콘솔 종료 핸들러).
     void ShutdownSave();
@@ -339,6 +365,43 @@ private:
         float ttl;   // 남은 시간
     };
     std::unordered_map<std::uint32_t, GroundDrop> groundDrops;
+
+    // 월드 보스 레이드 상태. playersLock으로 보호.
+    struct RaidState
+    {
+        std::uint32_t bossId = 0;          // 0이면 보스 없음
+        bool bossDown = false;             // 막타가 들어갔다(보상은 다음 틱에 정확히 한 번)
+        float spawnTimer = 60.0f;          // 다음 등장까지(서버 켜고 1분 뒤 첫 등장 = RAID_FIRST_SPAWN_SEC)
+        float statusTimer = 0.0f;
+        float slamTimer = 0.0f;            // 다음 내려찍기 예고까지
+        float slamDelay = -1.0f;           // 예고 후 피해까지(음수면 예고 없음)
+        float slamX = 0.0f;
+        float slamY = 0.0f;
+        // 기여도: 이름 -> 넣은 피해. 이름으로 묶어서 중간에 재접속해도 이어진다.
+        std::unordered_map<std::string, int> damageByName;
+        // 지난 레이드 결과(랭킹 창에 보여준다)
+        std::vector<RankEntry> lastResult;
+    };
+    RaidState raid;
+
+    // 랭킹 스냅샷. 다 만든 목록을 통째로 바꿔 끼운다(원자적 교체). 읽는 쪽은 playersLock 없이 그 순간의 목록을 가져간다.
+    // 쓰는 쪽: 레벨 = DB 스레드(또는 틱), 레이드 = 틱 스레드(정산할 때). 서로 다른 변수라 쓰기끼리도 안 겹친다.
+    using RankingList = std::vector<RankEntry>;
+    std::atomic<std::shared_ptr<const RankingList>> levelRanking{ std::make_shared<const RankingList>() };
+    std::atomic<std::shared_ptr<const RankingList>> raidRanking{ std::make_shared<const RankingList>() };
+    float rankingTimer = 1000.0f;   // 처음 틱에 바로 한 번 만든다
+    static constexpr float RANKING_REFRESH_SEC = 30.0f;
+
+    static constexpr int RAID_BOSS_HP = 30000;
+    static constexpr int RAID_BOSS_DEFENSE = 5;
+    static constexpr float RAID_FIRST_SPAWN_SEC = 60.0f;    // 서버 켜고 1분 뒤 첫 등장
+    static constexpr float RAID_RESPAWN_SEC = 300.0f;       // 잡히면 5분 뒤 다시
+    static constexpr float RAID_STATUS_INTERVAL = 1.0f;
+    static constexpr float RAID_SLAM_INTERVAL = 5.0f;
+    static constexpr float RAID_SLAM_WARNING = 1.2f;        // 예고 뒤 이만큼 있다가 피해
+    static constexpr float RAID_SLAM_RADIUS = 3.5f;
+    static constexpr int RAID_SLAM_DAMAGE = 18;
+    static constexpr float RAID_MIN_SHARE = 0.01f;          // 1% 이상 때려야 보상
 
     // 가구. playersLock으로 보호(집/플레이어와 같은 락).
     std::unordered_map<std::uint32_t, Furniture> furnitures;                              // id -> 가구

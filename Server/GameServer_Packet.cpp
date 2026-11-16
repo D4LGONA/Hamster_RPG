@@ -91,6 +91,11 @@ int GameServer::ProcessPacket(std::uint32_t playerId, const char* data, int byte
                 ProcessFurnitureMove(playerId, reinterpret_cast<const CS_FURNITURE_MOVE_PACKET*>(packetData));
             break;
 
+        case PACKET_TYPE::CS_RANKING_REQUEST:
+            if (packetSize == sizeof(CS_RANKING_REQUEST_PACKET))
+                ProcessRankingRequest(playerId);
+            break;
+
         case PACKET_TYPE::CS_ENHANCE:
             if (packetSize == sizeof(CS_ENHANCE_PACKET))
                 ProcessEnhance(playerId);

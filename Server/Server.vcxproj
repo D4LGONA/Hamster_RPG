@@ -158,6 +158,8 @@
     <ClCompile Include="GameServer_Chunk.cpp" />
     <ClCompile Include="GameServer_Item.cpp" />
     <ClCompile Include="GameServer_Furniture.cpp" />
+    <ClCompile Include="GameServer_Raid.cpp" />
+    <ClCompile Include="GameServer_Ranking.cpp" />
     <ClCompile Include="GameServer_Monster.cpp" />
     <ClCompile Include="GameServer_Combat.cpp" />
     <ClCompile Include="GameServer_House.cpp" />
