@@ -38,7 +38,7 @@ void GameServer::SpawnRaidBoss(std::vector<std::uint32_t>& monsterMovers, RaidSe
     const float y = WorldGen::ARENA_Y + 0.5f;
     const std::uint32_t id = nextMonsterId++;
 
-    Monster boss{ id, MonsterBehavior::Chase, x, y, RAID_BOSS_HP, WorldGen::MonsterKind::WorldBoss };
+    Monster boss{ id, MonsterBehavior::Chase, x, y, raidBossHp, WorldGen::MonsterKind::WorldBoss };
     boss.SetDefense(RAID_BOSS_DEFENSE);
     monsters.emplace(id, boss);
     sectorGrid.Add(id, x, y);
@@ -194,7 +194,7 @@ void GameServer::UpdateRaid(float deltaSeconds, std::vector<std::uint32_t>& play
         {
             FillName(status.top[i].name, ranked[i].first);
             status.top[i].value = ranked[i].second;
-            status.top[i].extra = static_cast<int>(1000LL * ranked[i].second / RAID_BOSS_HP);
+            status.top[i].extra = static_cast<int>(1000LL * ranked[i].second / raidBossHp);
         }
     }
 
@@ -228,7 +228,7 @@ void GameServer::FinishRaid(RaidSends& raidSends)
     {
         const std::string& name = ranked[i].first;
         const int damage = ranked[i].second;
-        const float share = static_cast<float>(damage) / RAID_BOSS_HP;
+        const float share = static_cast<float>(damage) / raidBossHp;
 
         if (raid.lastResult.size() < RANKING_COUNT)
         {

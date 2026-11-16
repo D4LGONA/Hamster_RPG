@@ -248,6 +248,116 @@ public class NetworkClient : MonoBehaviour
         mainThreadActions.Enqueue(() => OnFurnitureFailed?.Invoke(reason));
     }
 
+    // ---------------- 2026-11-16: 월드 보스 / 랭킹 ----------------
+    public class RaidStatus
+    {
+        public bool alive;
+        public int secondsToSpawn;
+        public int participants;
+        public uint bossId;
+        public int hp;
+        public int maxHp;
+        public Vector2 position;
+        public Protocol.RankEntry[] top = new Protocol.RankEntry[0];
+        public float receivedAt;
+    }
+
+    public struct RaidResult { public int rank, participants, sharePermille, damage, gold, exp; public bool gotClaw; }
+
+    private RaidStatus raidStatus;
+    public RaidStatus GetRaidStatus() { return raidStatus; }
+
+    public event System.Action<Vector2, float, float> OnRaidSlam;   // (위치, 반경, 몇 초 뒤)
+    public event System.Action<RaidResult> OnRaidResult;
+    public event System.Action<Protocol.RankEntry[], Protocol.RankEntry[]> OnRanking;   // (레벨, 지난 레이드)
+
+    public void SendRankingRequest()
+    {
+        if (isConnected && isLoggedIn && stream != null)
+        {
+            SendRaw(Protocol.MakeRankingRequestPacket());
+        }
+    }
+
+    private void HandleRaidStatus(byte[] packet)
+    {
+        int offset = Protocol.HeaderSize;
+        var status = new RaidStatus();
+        status.alive = Protocol.ReadByte(packet, ref offset) == 1;
+        int topCount = Protocol.ReadByte(packet, ref offset);
+        status.secondsToSpawn = Protocol.ReadUShort(packet, ref offset);
+        status.participants = Protocol.ReadUShort(packet, ref offset);
+        status.bossId = Protocol.ReadUInt(packet, ref offset);
+        status.hp = Protocol.ReadInt(packet, ref offset);
+        status.maxHp = Protocol.ReadInt(packet, ref offset);
+        float x = Protocol.ReadFloat(packet, ref offset);
+        float y = Protocol.ReadFloat(packet, ref offset);
+        status.position = new Vector2(x, y);
+
+        var top = new Protocol.RankEntry[Protocol.RaidTopCount];
+        for (int i = 0; i < top.Length; ++i)
+        {
+            top[i] = Protocol.ReadRankEntry(packet, ref offset);
+        }
+        status.top = new Protocol.RankEntry[Mathf.Min(topCount, top.Length)];
+        System.Array.Copy(top, status.top, status.top.Length);
+
+        mainThreadActions.Enqueue(() =>
+        {
+            status.receivedAt = Time.time;
+            raidStatus = status;
+        });
+    }
+
+    private void HandleRaidSlam(byte[] packet)
+    {
+        int offset = Protocol.HeaderSize;
+        float x = Protocol.ReadFloat(packet, ref offset);
+        float y = Protocol.ReadFloat(packet, ref offset);
+        float radius = Protocol.ReadFloat(packet, ref offset);
+        float delay = Protocol.ReadFloat(packet, ref offset);
+
+        mainThreadActions.Enqueue(() =>
+        {
+            SlamWarning.Create(new Vector2(x, y), radius, delay);
+            OnRaidSlam?.Invoke(new Vector2(x, y), radius, delay);
+        });
+    }
+
+    private void HandleRaidResult(byte[] packet)
+    {
+        int offset = Protocol.HeaderSize;
+        var r = new RaidResult();
+        r.rank = Protocol.ReadUShort(packet, ref offset);
+        r.participants = Protocol.ReadUShort(packet, ref offset);
+        r.sharePermille = Protocol.ReadUShort(packet, ref offset);
+        r.gotClaw = Protocol.ReadByte(packet, ref offset) == 1;
+        r.damage = Protocol.ReadInt(packet, ref offset);
+        r.gold = Protocol.ReadInt(packet, ref offset);
+        r.exp = Protocol.ReadInt(packet, ref offset);
+
+        mainThreadActions.Enqueue(() => OnRaidResult?.Invoke(r));
+    }
+
+    private void HandleRanking(byte[] packet)
+    {
+        int offset = Protocol.HeaderSize;
+        int levelCount = Protocol.ReadByte(packet, ref offset);
+        int raidCount = Protocol.ReadByte(packet, ref offset);
+
+        var level = new Protocol.RankEntry[Protocol.RankingCount];
+        var raid = new Protocol.RankEntry[Protocol.RankingCount];
+        for (int i = 0; i < level.Length; ++i) level[i] = Protocol.ReadRankEntry(packet, ref offset);
+        for (int i = 0; i < raid.Length; ++i) raid[i] = Protocol.ReadRankEntry(packet, ref offset);
+
+        var levelOut = new Protocol.RankEntry[Mathf.Min(levelCount, level.Length)];
+        var raidOut = new Protocol.RankEntry[Mathf.Min(raidCount, raid.Length)];
+        System.Array.Copy(level, levelOut, levelOut.Length);
+        System.Array.Copy(raid, raidOut, raidOut.Length);
+
+        mainThreadActions.Enqueue(() => OnRanking?.Invoke(levelOut, raidOut));
+    }
+
     public void SendEnhance()
     {
         if (isConnected == false || isLoggedIn == false || stream == null)
@@ -700,6 +810,18 @@ public class NetworkClient : MonoBehaviour
                 break;
             case Protocol.PacketType.SC_FURNITURE_RESULT:
                 HandleFurnitureResult(packet);
+                break;
+            case Protocol.PacketType.SC_RAID_STATUS:
+                HandleRaidStatus(packet);
+                break;
+            case Protocol.PacketType.SC_RAID_SLAM:
+                HandleRaidSlam(packet);
+                break;
+            case Protocol.PacketType.SC_RAID_RESULT:
+                HandleRaidResult(packet);
+                break;
+            case Protocol.PacketType.SC_RANKING:
+                HandleRanking(packet);
                 break;
             default:
                 mainThreadActions.Enqueue(() => Debug.LogWarning("[NETWORK] Unknown packet type: " + packetType));

@@ -39,6 +39,8 @@ public:
     // 틱의 각 단계가 몇 ms 먹는지 주기적으로 찍는다. 뭘 워커로 분리할지 정하려면
     // 추측이 아니라 이 숫자를 보고 골라야 한다. Run() 전에 호출할 것.
     void SetProfile(bool on) { profileEnabled = on; }
+    // 2026-11-16: 레이드 부하 테스트용. 첫 등장 시각(초)과 보스 HP를 바꾼다.
+    void SetRaidTest(float firstSpawnSec, int bossHp) { raid.spawnTimer = firstSpawnSec; if (bossHp > 0) { raidBossHp = bossHp; } }
 
 private:
     bool Initialize();
@@ -393,6 +395,7 @@ private:
     static constexpr float RANKING_REFRESH_SEC = 30.0f;
 
     static constexpr int RAID_BOSS_HP = 30000;
+    int raidBossHp = RAID_BOSS_HP;   // --raid-hp로 바꿀 수 있다(기여도 계산도 이 값 기준)
     static constexpr int RAID_BOSS_DEFENSE = 5;
     static constexpr float RAID_FIRST_SPAWN_SEC = 60.0f;    // 서버 켜고 1분 뒤 첫 등장
     static constexpr float RAID_RESPAWN_SEC = 300.0f;       // 잡히면 5분 뒤 다시

@@ -81,7 +81,14 @@ public static class Protocol
         SC_FURNITURE_SPAWN = 28,
         SC_FURNITURE_MOVED = 29,
         SC_FURNITURE_REMOVED = 30,
-        SC_FURNITURE_RESULT = 31
+        SC_FURNITURE_RESULT = 31,
+
+        // 2026-11-16: 월드 보스 / 랭킹
+        SC_RAID_STATUS = 32,
+        SC_RAID_SLAM = 33,
+        SC_RAID_RESULT = 34,
+        CS_RANKING_REQUEST = 35,
+        SC_RANKING = 36
     }
     public struct PlayerStatsData
     {
@@ -237,6 +244,29 @@ public static class Protocol
         WriteHeader(packet, ref offset, PacketType.CS_FURNITURE_REMOVE);
         WriteUInt(packet, ref offset, furnitureId);
 
+        return packet;
+    }
+
+    public const int RaidTopCount = 5;
+    public const int RankingCount = 10;
+
+    public struct RankEntry { public string name; public int value; public int extra; }
+
+    // RankEntry: 이름(20) + value(4) + extra(4)
+    public static RankEntry ReadRankEntry(byte[] buffer, ref int offset)
+    {
+        RankEntry e;
+        e.name = ReadFixedString(buffer, ref offset, NameSize);
+        e.value = ReadInt(buffer, ref offset);
+        e.extra = ReadInt(buffer, ref offset);
+        return e;
+    }
+
+    public static byte[] MakeRankingRequestPacket()
+    {
+        byte[] packet = new byte[HeaderSize];
+        int offset = 0;
+        WriteHeader(packet, ref offset, PacketType.CS_RANKING_REQUEST);
         return packet;
     }
 

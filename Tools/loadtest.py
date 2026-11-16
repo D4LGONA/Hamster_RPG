@@ -51,6 +51,10 @@ except Exception:
 
 # ---------------- 프로토콜 (protocol.h와 1:1, #pragma pack(1)) ----------------
 CS_LOGIN, CS_INPUT = 1, 2
+CS_ATTACK, ATTACK_SIZE = 11, 12      # 2026-11-16: --raid 모드에서 봇이 왕 고양이를 때린다
+SC_RAID_RESULT = 34
+ARENA = (0.5, 48.5)                  # WorldGen ARENA_X/Y 칸 중심
+RAID_MODE = False
 SC_LOGIN_RESULT, SC_SPAWN, SC_DESPAWN, SC_MOVEOBJECT = 5, 6, 7, 8
 LOGIN_SIZE, INPUT_SIZE = 24, 12
 MONSTER_ID_BASE = 1000000        # GameServer::MONSTER_ID_BASE
@@ -73,6 +77,10 @@ def pkt_input(dx, dy):
     return struct.pack('<HHff', INPUT_SIZE, CS_INPUT, dx, dy)
 
 
+def pkt_attack(dx, dy):
+    return struct.pack('<HHff', ATTACK_SIZE, CS_ATTACK, dx, dy)
+
+
 def pct(vals, p):
     if not vals:
         return 0.0
@@ -92,6 +100,8 @@ class Stats:
         self.ticks = deque(maxlen=4000)
         self.loop_lag = deque(maxlen=400)
         self.monsters = {}          # id -> (x, y). 어느 봇이든 본 몬스터의 최신 위치
+        self.attacks = 0            # --raid: 보낸 공격 수
+        self.raid_results = 0       # --raid: 정산 결과를 받은 봇 수
 
     def recent_pings(self, now, window=PING_WINDOW):
         while self.pings and self.pings[0][0] < now - window:
@@ -135,6 +145,14 @@ class Bot:
         self.alive = False
 
     def pick_dir(self):
+        # --raid: 경기장으로 모여서 보스 둘레(반경 1~3)를 맴돈다. 수백 명이 한 마리를 동시에 때리는 상황.
+        if RAID_MODE:
+            dx, dy = ARENA[0] - self.x, ARENA[1] - self.y
+            dist = math.hypot(dx, dy)
+            if dist > 3.0:
+                return (dx / dist, dy / dist)
+            ang = random.uniform(0.0, 2.0 * math.pi)
+            return (math.cos(ang) * 0.3, math.sin(ang) * 0.3)
         # 스폰 영역을 벗어나면 안쪽으로. 봇이 area 안에 머물러야 밀도가 유지된다.
         if self.area > 0 and max(abs(self.x), abs(self.y)) > self.area:
             ang = math.atan2(-self.y, -self.x) + random.uniform(-0.4, 0.4)
@@ -172,6 +190,8 @@ class Bot:
                     st.monsters[eid] = unpack_from('<ff', buf, off + 28)
         elif ptype == SC_DESPAWN:
             self.view -= 1
+        elif ptype == SC_RAID_RESULT:
+            st.raid_results += 1
         elif ptype == SC_LOGIN_RESULT:
             _ok, pid, x, y = unpack_from('<BIff', buf, off + 4)
             self.id = pid
@@ -206,10 +226,23 @@ class Bot:
         self.send_input(*self.pick_dir())
         next_probe = time.monotonic() + PROBE_PERIOD * random.uniform(0.2, 1.0)
         next_turn = time.monotonic() + random.uniform(2.0, 5.0)
+        next_attack = time.monotonic() + random.uniform(0.0, 0.6)
 
         while self.alive:
             await asyncio.sleep(0.1)
             now = time.monotonic()
+
+            if RAID_MODE and now >= next_attack:
+                # 보스 쪽으로 휘두른다(서버 공격 쿨다운보다 살짝 길게)
+                dx, dy = ARENA[0] - self.x, ARENA[1] - self.y
+                dist = math.hypot(dx, dy) or 1.0
+                if dist < 6.0:
+                    self.writer.write(pkt_attack(dx / dist, dy / dist))
+                    self.stats.tx_packets += 1
+                    self.stats.attacks += 1
+                next_attack = now + 0.6
+                if math.hypot(ARENA[0] - self.x, ARENA[1] - self.y) > 3.0:
+                    self.send_input(*self.pick_dir())
 
             if now >= next_probe:
                 # 정지 중엔 이동 패킷이 안 오므로, 출발 직후 첫 패킷까지가 곧 핑이다.
@@ -470,6 +503,8 @@ class Runner:
     def report(self):
         a = self.a
         print('\n===== 결과 =====')
+        if RAID_MODE:
+            print(f'  레이드 모드      공격 {self.st.attacks}회 보냄, 정산 결과 받은 봇 {self.st.raid_results}명')
         if self.client_saturated:
             print('  ! 도중에 이 스크립트가 밀렸다(cli > 25ms). 아래 숫자는 서버 한계가 아니라 파이썬')
             print('    한계일 수 있다. 봇을 여러 프로세스로 나눠 다시 재라(--no-viz도 같이).')
@@ -531,7 +566,12 @@ def main():
     ap.add_argument('--host', default='127.0.0.1')
     ap.add_argument('--port', type=int, default=4000)
     ap.add_argument('--proc', default='Server', help='서버 프로세스 이름 (기본 Server)')
+    ap.add_argument('--raid', action='store_true',
+                    help='레이드 모드: 봇이 북쪽 경기장으로 모여 왕 고양이를 때린다. 서버는 --raid-at 10 --raid-hp 2000000 처럼 켠다')
     args = ap.parse_args()
+
+    global RAID_MODE
+    RAID_MODE = args.raid
 
     vq, vp = None, None
     if not args.no_viz:

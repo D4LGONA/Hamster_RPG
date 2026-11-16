@@ -6,6 +6,7 @@
 //   왼쪽      : 경험치/골드 획득 알림 (떠오르며 사라짐)
 //   가운데    : 상태창 (Tab 또는 C)
 //   2026-11-13: 가방 (I) — 칸을 누르면 먹기/무기 장착. Q는 회복 아이템 바로 먹기.
+//   2026-11-16: 레이드 막대(가운데 위: 왕 고양이 HP + 기여도 상위 5명), 미니맵에 보스 표시/방향, 결과창, 랭킹 창(K)
 //               강화 (E) — 장착한 무기를 강화. 성공률/비용은 서버와 같은 공식으로 미리 보여주고 판정은 서버가 한다.
 //               주운 아이템 알림, 쓰러짐 알림, 맞으면 화면 가장자리가 빨갛게 번쩍.
 //
@@ -116,6 +117,20 @@ public class GameHUD : MonoBehaviour
     private Image hurtOverlay;
     private float hurtTimer;
 
+    // 레이드
+    private GameObject raidPanel, raidTopPanel;
+    private TextMeshProUGUI raidTitle, raidHpText, raidCountdown, raidDistance;
+    private RectTransform raidHpFill;
+    private readonly TextMeshProUGUI[] raidTopLines = new TextMeshProUGUI[Protocol.RaidTopCount];
+    private GameObject resultWindow;
+    private TextMeshProUGUI resultText;
+    private float resultTimer;
+
+    // 랭킹
+    private GameObject rankingWindow;
+    private readonly TextMeshProUGUI[] rankLevelLines = new TextMeshProUGUI[Protocol.RankingCount];
+    private readonly TextMeshProUGUI[] rankRaidLines = new TextMeshProUGUI[Protocol.RankingCount];
+
     private int lastStatVersion = -1;
     private bool hasPrev;
     private int prevLevel, prevExp, prevGold;
@@ -153,6 +168,8 @@ public class GameHUD : MonoBehaviour
         UpdateStatusWindowToggle();
         UpdateInventory(net);
         UpdateEnhanceWindow(net);
+        UpdateRaidPanel(net);
+        UpdateRankingToggle(net);
         UpdateMinimap(net);
         UpdateToasts();
     }
@@ -195,6 +212,9 @@ public class GameHUD : MonoBehaviour
         BuildStatusWindow(canvasRect);
         BuildInventoryWindow(canvasRect);
         BuildEnhanceWindow(canvasRect);
+        BuildRaidPanel(canvasRect);
+        BuildResultWindow(canvasRect);
+        BuildRankingWindow(canvasRect);
 
         NetworkClient net = NetworkClient.Instance;
         if (net != null)
@@ -214,6 +234,8 @@ public class GameHUD : MonoBehaviour
             };
             net.OnLocalPlayerHurt += () => hurtTimer = 0.35f;
             net.OnEnhanceResult += OnEnhanceResult;
+            net.OnRaidResult += ShowRaidResult;
+            net.OnRanking += ShowRanking;
         }
 
         HideEmptySceneStatWindow();
@@ -276,7 +298,7 @@ public class GameHUD : MonoBehaviour
     {
         toastRoot = new GameObject("LevelUp", typeof(RectTransform)).GetComponent<RectTransform>();
         toastRoot.SetParent(canvas, false);
-        Place(toastRoot, new Vector2(0.5f, 1), new Vector2(0, -200), new Vector2(440, 70));   // 패널들 아래, 캐릭터 위
+        Place(toastRoot, new Vector2(0.5f, 1), new Vector2(0, -250), new Vector2(440, 70));   // 레이드 막대 아래, 캐릭터 위
 
         levelUpText = Text(toastRoot, "Text", "", 38, Gold, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(440, 70), TextAlignmentOptions.Center);
         levelUpText.fontStyle = FontStyles.Bold;
@@ -487,6 +509,22 @@ public class GameHUD : MonoBehaviour
             {
                 Vector2 p = other.transform.position;
                 Dot(p.x - left, p.y - bottom, 4, MapOther, true);
+            }
+        }
+
+        // 왕 고양이: 보이는 범위 안이면 큰 점, 밖이면 테두리에 방향 표시
+        NetworkClient.RaidStatus raidNow = net.GetRaidStatus();
+        if (raidNow != null && raidNow.alive && Time.time - raidNow.receivedAt < 3.0f)
+        {
+            Vector2 rel = raidNow.position - center;
+            if (Mathf.Abs(rel.x) < half - 4 && Mathf.Abs(rel.y) < half - 4)
+            {
+                Dot(rel.x + half, rel.y + half, 8, MapBoss, true);
+            }
+            else
+            {
+                float scale = (half - 4) / Mathf.Max(Mathf.Abs(rel.x), Mathf.Abs(rel.y));
+                Dot(rel.x * scale + half, rel.y * scale + half, 6, MapBoss, true);
             }
         }
 
@@ -898,6 +936,200 @@ public class GameHUD : MonoBehaviour
                 enhanceResult.text = "이미 최대 강화예요";
                 enhanceResult.color = BrownSoft;
                 break;
+        }
+    }
+
+    // =====================================================================
+    // 2026-11-16: 레이드 / 랭킹
+    // =====================================================================
+
+    private void BuildRaidPanel(RectTransform canvas)
+    {
+        RectTransform panel = Panel(canvas, "RaidPanel", panelDarkSprite, new Vector2(0.5f, 1), new Vector2(0, -10), new Vector2(340, 56));
+        raidPanel = panel.gameObject;
+
+        raidTitle = Text(panel, "Title", "", 14, Gold, new Vector2(0.5f, 1), new Vector2(0, -6), new Vector2(320, 18), TextAlignmentOptions.Center);
+        raidTitle.fontStyle = FontStyles.Bold;
+        raidHpFill = Bar(panel, "BossHp", new Vector2(10, -28), new Vector2(320, 18), new Color32(220, 70, 90, 255), out raidHpText, out _);
+
+        raidTopPanel = Panel(panel, "Top", panelSprite, new Vector2(0.5f, 1), new Vector2(0, -58), new Vector2(240, 96)).gameObject;
+        RectTransform top = (RectTransform)raidTopPanel.transform;
+        Text(top, "Header", "기여도", 12, BrownSoft, new Vector2(0.5f, 1), new Vector2(0, -6), new Vector2(220, 16), TextAlignmentOptions.Center).fontStyle = FontStyles.Bold;
+        for (int i = 0; i < raidTopLines.Length; ++i)
+        {
+            raidTopLines[i] = Text(top, "Line" + i, "", 12, Brown, new Vector2(0, 1), new Vector2(12, -22 - i * 14), new Vector2(216, 14), TextAlignmentOptions.Left);
+        }
+
+        raidCountdown = Text(canvas, "RaidCountdown", "", 13, Color.white, new Vector2(0.5f, 1), new Vector2(0, -14), new Vector2(340, 20), TextAlignmentOptions.Center);
+        raidCountdown.outlineWidth = 0.25f;
+        raidCountdown.outlineColor = new Color32(40, 24, 18, 255);
+
+        raidDistance = Text(canvas, "RaidDistance", "", 12, Gold, new Vector2(0.5f, 1), new Vector2(0, -164), new Vector2(340, 18), TextAlignmentOptions.Center);
+        raidDistance.outlineWidth = 0.25f;
+        raidDistance.outlineColor = new Color32(40, 24, 18, 255);
+
+        raidPanel.SetActive(false);
+    }
+
+    private void UpdateRaidPanel(NetworkClient net)
+    {
+        NetworkClient.RaidStatus status = net.GetRaidStatus();
+        bool fresh = status != null && Time.time - status.receivedAt < 3.0f;
+        bool alive = fresh && status.alive;
+        bool inWorld = net.GetCurrentZoneId() == 0;
+
+        raidPanel.SetActive(alive);
+        raidCountdown.gameObject.SetActive(fresh && alive == false && status.secondsToSpawn <= 60);
+        raidDistance.gameObject.SetActive(false);
+
+        if (fresh && alive == false && status.secondsToSpawn <= 60)
+        {
+            raidCountdown.text = string.Format("왕 고양이 등장까지 {0}:{1:00}", status.secondsToSpawn / 60, status.secondsToSpawn % 60);
+        }
+
+        if (alive == false)
+        {
+            return;
+        }
+
+        raidTitle.text = "왕 고양이  ·  참가 " + status.participants + "명";
+        SetBar(raidHpFill, status.maxHp > 0 ? (float)status.hp / status.maxHp : 0.0f);
+        raidHpText.text = status.hp.ToString("N0") + " / " + status.maxHp.ToString("N0");
+
+        raidTopPanel.SetActive(status.top.Length > 0);
+        string myName = net.GetPlayerName();
+        for (int i = 0; i < raidTopLines.Length; ++i)
+        {
+            if (i < status.top.Length)
+            {
+                Protocol.RankEntry e = status.top[i];
+                raidTopLines[i].text = (i + 1) + ". " + e.name + "   " + (e.extra / 10.0f).ToString("0.0") + "%";
+                raidTopLines[i].color = e.name == myName ? (Color)new Color32(200, 90, 40, 255) : Brown;
+            }
+            else
+            {
+                raidTopLines[i].text = "";
+            }
+        }
+
+        // 멀리 있으면 거리와 방향을 알려 준다
+        GameObject me = net.GetLocalPlayerObject();
+        if (inWorld && me != null)
+        {
+            Vector2 rel = status.position - (Vector2)me.transform.position;
+            float distance = rel.magnitude;
+            if (distance > 12.0f)
+            {
+                string arrow = Mathf.Abs(rel.x) > Mathf.Abs(rel.y) ? (rel.x > 0 ? "→" : "←") : (rel.y > 0 ? "↑" : "↓");
+                raidDistance.text = arrow + " 왕 고양이까지 " + Mathf.RoundToInt(distance) + "m";
+                raidDistance.gameObject.SetActive(true);
+            }
+        }
+    }
+
+    private void BuildResultWindow(RectTransform canvas)
+    {
+        RectTransform panel = Panel(canvas, "RaidResult", panelSprite, new Vector2(0.5f, 0.5f), new Vector2(0, 40), new Vector2(300, 220));
+        panel.GetComponent<Image>().raycastTarget = true;
+        resultWindow = panel.gameObject;
+
+        TextMeshProUGUI title = Text(panel, "Title", "왕 고양이 토벌!", 22, new Color32(200, 90, 40, 255), new Vector2(0.5f, 1), new Vector2(0, -16), new Vector2(280, 30), TextAlignmentOptions.Center);
+        title.fontStyle = FontStyles.Bold;
+        resultText = Text(panel, "Body", "", 15, Brown, new Vector2(0.5f, 1), new Vector2(0, -56), new Vector2(270, 130), TextAlignmentOptions.Top);
+        resultText.enableWordWrapping = true;
+
+        RectTransform close = Panel(panel, "Close", panelDarkSprite, new Vector2(1, 1), new Vector2(-10, -10), new Vector2(30, 30));
+        Text(close, "X", "X", 16, Color.white, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(30, 30), TextAlignmentOptions.Center).fontStyle = FontStyles.Bold;
+        close.GetComponent<Image>().raycastTarget = true;
+        close.gameObject.AddComponent<Button>().onClick.AddListener(() => resultWindow.SetActive(false));
+
+        resultWindow.SetActive(false);
+    }
+
+    private void ShowRaidResult(NetworkClient.RaidResult r)
+    {
+        resultText.text =
+            r.participants + "명 중 <b>" + r.rank + "등</b>\n" +
+            "기여도 " + (r.sharePermille / 10.0f).ToString("0.0") + "%  (피해 " + r.damage.ToString("N0") + ")\n\n" +
+            "+" + r.gold.ToString("N0") + " 해바라기씨\n" +
+            "+" + r.exp.ToString("N0") + " 경험치\n" +
+            "블루베리 2개" + (r.gotClaw ? "\n<color=#C85A28>고양이 발톱!</color>" : "");
+        resultWindow.SetActive(true);
+        resultTimer = 8.0f;
+        ShowToast("왕 고양이 토벌!  " + r.rank + "등", Gold);
+    }
+
+    private void BuildRankingWindow(RectTransform canvas)
+    {
+        RectTransform panel = Panel(canvas, "RankingWindow", panelSprite, new Vector2(0.5f, 0.5f), new Vector2(0, -10), new Vector2(380, 380));
+        panel.GetComponent<Image>().raycastTarget = true;
+        rankingWindow = panel.gameObject;
+
+        TextMeshProUGUI title = Text(panel, "Title", "랭킹", 20, Brown, new Vector2(0.5f, 1), new Vector2(0, -14), new Vector2(200, 28), TextAlignmentOptions.Center);
+        title.fontStyle = FontStyles.Bold;
+
+        RectTransform close = Panel(panel, "Close", panelDarkSprite, new Vector2(1, 1), new Vector2(-10, -10), new Vector2(30, 30));
+        Text(close, "X", "X", 16, Color.white, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(30, 30), TextAlignmentOptions.Center).fontStyle = FontStyles.Bold;
+        close.GetComponent<Image>().raycastTarget = true;
+        close.gameObject.AddComponent<Button>().onClick.AddListener(() => rankingWindow.SetActive(false));
+
+        Text(panel, "LevelHeader", "레벨", 15, BrownSoft, new Vector2(0, 1), new Vector2(20, -52), new Vector2(160, 20), TextAlignmentOptions.Left).fontStyle = FontStyles.Bold;
+        Text(panel, "RaidHeader", "지난 왕 고양이", 15, BrownSoft, new Vector2(0, 1), new Vector2(200, -52), new Vector2(160, 20), TextAlignmentOptions.Left).fontStyle = FontStyles.Bold;
+
+        for (int i = 0; i < Protocol.RankingCount; ++i)
+        {
+            rankLevelLines[i] = Text(panel, "L" + i, "", 13, Brown, new Vector2(0, 1), new Vector2(20, -80 - i * 26), new Vector2(170, 22), TextAlignmentOptions.Left);
+            rankRaidLines[i] = Text(panel, "R" + i, "", 13, Brown, new Vector2(0, 1), new Vector2(200, -80 - i * 26), new Vector2(170, 22), TextAlignmentOptions.Left);
+        }
+
+        Text(panel, "Hint", "30초마다 새로 매겨요  ·  K: 닫기", 12, BrownSoft, new Vector2(0.5f, 0), new Vector2(0, 10), new Vector2(300, 18), TextAlignmentOptions.Center);
+        rankingWindow.SetActive(false);
+    }
+
+    private void UpdateRankingToggle(NetworkClient net)
+    {
+        if (resultTimer > 0.0f)
+        {
+            resultTimer -= Time.deltaTime;
+            if (resultTimer <= 0.0f) resultWindow.SetActive(false);
+        }
+
+        bool chatting = ChatUI.Instance != null && ChatUI.Instance.IsChatting();
+        if (chatting == false && Input.GetKeyDown(KeyCode.K))
+        {
+            rankingWindow.SetActive(!rankingWindow.activeSelf);
+            if (rankingWindow.activeSelf)
+            {
+                net.SendRankingRequest();   // 열 때마다 새로(서버는 스냅샷을 읽어 바로 준다)
+            }
+        }
+    }
+
+    private void ShowRanking(Protocol.RankEntry[] levels, Protocol.RankEntry[] raids)
+    {
+        string myName = NetworkClient.Instance != null ? NetworkClient.Instance.GetPlayerName() : "";
+
+        for (int i = 0; i < Protocol.RankingCount; ++i)
+        {
+            if (i < levels.Length)
+            {
+                rankLevelLines[i].text = (i + 1) + ". " + levels[i].name + "  Lv." + levels[i].value;
+                rankLevelLines[i].color = levels[i].name == myName ? (Color)new Color32(200, 90, 40, 255) : Brown;
+            }
+            else
+            {
+                rankLevelLines[i].text = i == 0 ? "아직 없어요" : "";
+            }
+
+            if (i < raids.Length)
+            {
+                rankRaidLines[i].text = (i + 1) + ". " + raids[i].name + "  " + (raids[i].extra / 10.0f).ToString("0.0") + "%";
+                rankRaidLines[i].color = raids[i].name == myName ? (Color)new Color32(200, 90, 40, 255) : Brown;
+            }
+            else
+            {
+                rankRaidLines[i].text = i == 0 ? "아직 없어요" : "";
+            }
         }
     }
 

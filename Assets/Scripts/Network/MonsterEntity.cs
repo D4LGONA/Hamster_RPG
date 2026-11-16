@@ -80,6 +80,7 @@ public class MonsterEntity : MonoBehaviour
                 case "Caterpillar": display = "애벌레"; break;
                 case "Ladybug":     display = "무당벌레"; break;
                 case "CatBoss":     display = "고양이 대장"; break;
+                case "WorldBoss":   display = "왕 고양이"; break;
             }
 
             label.text = display ?? "";
@@ -88,7 +89,7 @@ public class MonsterEntity : MonoBehaviour
             // 순둥(애벌레)은 흰 이름, 먼저 덤비는 몬스터는 빨간 이름. 보스는 아래에서 금색으로 덮는다.
             label.color = Kind == "Caterpillar" ? Color.white : new Color32(255, 110, 110, 255);
 
-            if (Kind == "CatBoss")
+            if (Kind == "CatBoss" || Kind == "WorldBoss")
             {
                 label.color = new Color32(255, 214, 90, 255);   // 보스는 금색 이름
                 // 보스 그림이 두 배라 이름표가 얼굴에 묻힌다. 이름표가 든 캔버스째 올린다.
@@ -103,6 +104,7 @@ public class MonsterEntity : MonoBehaviour
             case "Caterpillar": sheet = "Monsters/Monster_Caterpillar"; break;
             case "Ladybug":     sheet = "Monsters/Monster_Ladybug"; break;
             case "CatBoss":     sheet = "Monsters/Boss_Cat"; break;
+            case "WorldBoss":   sheet = "Monsters/Boss_Cat"; break;   // 왕 고양이: 같은 그림을 두 배로
         }
 
         if (sheet == null || spriteRenderer == null)
@@ -128,6 +130,14 @@ public class MonsterEntity : MonoBehaviour
         }
 
         spriteRenderer.sprite = frames[0];
+
+        // 2026-11-16: 왕 고양이는 고양이 대장을 두 배로 키운다(8유닛). 체력은 화면 위 레이드 막대로 본다.
+        if (kind == "WorldBoss")
+        {
+            transform.localScale = new Vector3(2.0f, 2.0f, 1.0f);
+            spriteRenderer.color = new Color(1.0f, 0.92f, 0.85f);   // 살짝 붉은 기
+            baseColor = spriteRenderer.color;
+        }
 
         // 보스는 그림이 두 배(4유닛)라서 체력바를 머리 위로 올린다.
         if (kind == "CatBoss")

@@ -35,6 +35,19 @@ int main(int argc, char* argv[])
             server.SetRandomSpawn(extent);
             std::cout << "[LOADTEST] random spawn: +-" << extent << std::endl;
         }
+        else if (std::strcmp(argv[i], "--raid-at") == 0 && i + 1 < argc)
+        {
+            // --raid-at <초> [--raid-hp <HP>] : 레이드 부하 테스트. 왕 고양이를 이 시간 뒤에 부른다.
+            float at = static_cast<float>(std::atof(argv[++i]));
+            int hp = 0;
+            if (i + 2 < argc && std::strcmp(argv[i + 1], "--raid-hp") == 0)
+            {
+                hp = std::atoi(argv[i + 2]);
+                i += 2;
+            }
+            server.SetRaidTest(at, hp);
+            std::cout << "[LOADTEST] raid boss at " << at << "s, hp " << (hp > 0 ? hp : 30000) << std::endl;
+        }
         else if (std::strcmp(argv[i], "--profile") == 0)
         {
             server.SetProfile(true);
