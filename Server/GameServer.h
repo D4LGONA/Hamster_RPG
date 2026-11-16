@@ -85,6 +85,7 @@ private:
     void ProcessTradeOffer(std::uint32_t playerId, const CS_TRADE_OFFER_PACKET* packet);
     void ProcessTradeConfirm(std::uint32_t playerId);
     void ProcessTradeCancel(std::uint32_t playerId);
+    void ProcessPlayerInfoRequest(std::uint32_t playerId, const CS_PLAYER_INFO_REQUEST_PACKET* packet);   // 2026-11-16: 우클릭 정보
     // 거래를 닫고 두 사람에게 이유를 알린다(보낼 패킷은 sends에). playersLock 안에서.
     void CloseTrade(std::uint32_t tradeId, std::uint8_t reasonA, std::uint8_t reasonB, TradeCloseSends& sends);
     // 이 사람이 거래 중이면 닫는다(접속 종료, 집에 들어감). 상대에게는 reason 2. playersLock 안에서.

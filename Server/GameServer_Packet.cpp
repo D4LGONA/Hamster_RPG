@@ -116,6 +116,11 @@ int GameServer::ProcessPacket(std::uint32_t playerId, const char* data, int byte
                 ProcessTradeCancel(playerId);
             break;
 
+        case PACKET_TYPE::CS_PLAYER_INFO_REQUEST:
+            if (packetSize == sizeof(CS_PLAYER_INFO_REQUEST_PACKET))
+                ProcessPlayerInfoRequest(playerId, reinterpret_cast<const CS_PLAYER_INFO_REQUEST_PACKET*>(packetData));
+            break;
+
         case PACKET_TYPE::CS_RANKING_REQUEST:
             if (packetSize == sizeof(CS_RANKING_REQUEST_PACKET))
                 ProcessRankingRequest(playerId);

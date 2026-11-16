@@ -99,7 +99,11 @@ public static class Protocol
         SC_TRADE_UPDATE = 42,
         CS_TRADE_CONFIRM = 43,
         CS_TRADE_CANCEL = 44,
-        SC_TRADE_CLOSED = 45
+        SC_TRADE_CLOSED = 45,
+
+        // 2026-11-16: 다른 햄스터 정보 보기(우클릭)
+        CS_PLAYER_INFO_REQUEST = 46,
+        SC_PLAYER_INFO = 47
     }
     public struct PlayerStatsData
     {
@@ -288,6 +292,15 @@ public static class Protocol
         byte[] packet = new byte[HeaderSize];
         int offset = 0;
         WriteHeader(packet, ref offset, type);
+        return packet;
+    }
+
+    public static byte[] MakePlayerInfoRequestPacket(uint targetId)
+    {
+        byte[] packet = new byte[HeaderSize + 4];
+        int offset = 0;
+        WriteHeader(packet, ref offset, PacketType.CS_PLAYER_INFO_REQUEST);
+        WriteUInt(packet, ref offset, targetId);
         return packet;
     }
 

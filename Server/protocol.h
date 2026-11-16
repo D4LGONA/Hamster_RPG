@@ -103,6 +103,10 @@ enum class PACKET_TYPE : std::uint16_t
     CS_TRADE_CONFIRM,      // 43  확인(양쪽 다 누르면 교환)
     CS_TRADE_CANCEL,       // 44  취소
     SC_TRADE_CLOSED,       // 45  끝남(성공/취소/실패 이유)
+
+    // 2026-11-16: 다른 햄스터 정보 보기(우클릭)
+    CS_PLAYER_INFO_REQUEST, // 46  이 사람 정보 보여줘
+    SC_PLAYER_INFO,         // 47  레벨/전투력/공격/방어/최대HP/무기
 };
 
 // 모든 패킷 맨 앞에 붙는 헤더(size + type)의 크기. 4바이트.
@@ -594,6 +598,34 @@ struct SC_PLAYER_FAINT_PACKET
     int goldLost;
 };
 
+// ==============================
+// 2026-11-16: 다른 햄스터 정보 보기
+// ==============================
+struct CS_PLAYER_INFO_REQUEST_PACKET
+{
+    std::uint16_t size;
+    PACKET_TYPE type;
+
+    std::uint32_t targetId;
+};
+
+struct SC_PLAYER_INFO_PACKET
+{
+    std::uint16_t size;
+    PACKET_TYPE type;
+
+    std::uint32_t id;
+    std::uint8_t found;            // 0이면 없거나 안 보이는 사람(아래 값은 비어 있음)
+    char name[NAME_SIZE];
+    int level;
+    int combatPower;
+    int attack;
+    int defense;
+    int maxHp;
+    std::uint16_t weaponItemId;    // 0이면 맨손
+    std::uint8_t weaponEnhance;
+};
+
 #pragma pack(pop)
 
 // 2026-11-16: 패킷 크기를 고정한다(클라 Protocol.cs가 같은 바이트 수로 읽는다). 어긋나면 빌드가 깨져서 바로 안다.
@@ -626,3 +658,5 @@ static_assert(sizeof(CS_TRADE_OFFER_PACKET) == PACKET_HEADER_BYTES + 1 + TRADE_M
 static_assert(sizeof(TradeOfferData) == 1 + TRADE_MAX_SLOTS * 5 + 4 + 1, "TradeOfferData 크기 불일치");
 static_assert(sizeof(SC_TRADE_UPDATE_PACKET) == PACKET_HEADER_BYTES + 2 * sizeof(TradeOfferData), "SC_TRADE_UPDATE 크기 불일치");
 static_assert(sizeof(SC_TRADE_CLOSED_PACKET) == PACKET_HEADER_BYTES + 1, "SC_TRADE_CLOSED 크기 불일치");
+static_assert(sizeof(CS_PLAYER_INFO_REQUEST_PACKET) == PACKET_HEADER_BYTES + 4, "CS_PLAYER_INFO_REQUEST 크기 불일치");
+static_assert(sizeof(SC_PLAYER_INFO_PACKET) == PACKET_HEADER_BYTES + 4 + 1 + NAME_SIZE + 5 * 4 + 3, "SC_PLAYER_INFO 크기 불일치");

@@ -160,6 +160,7 @@
     <ClCompile Include="GameServer_Furniture.cpp" />
     <ClCompile Include="GameServer_Raid.cpp" />
     <ClCompile Include="GameServer_Ranking.cpp" />
+    <ClCompile Include="GameServer_Info.cpp" />
     <ClCompile Include="GameServer_Trade.cpp" />
     <ClCompile Include="GameServer_Monster.cpp" />
     <ClCompile Include="GameServer_Combat.cpp" />

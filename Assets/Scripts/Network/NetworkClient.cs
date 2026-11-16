@@ -385,6 +385,38 @@ public class NetworkClient : MonoBehaviour
         }
     }
 
+    // ---------------- 2026-11-16: 다른 햄스터 정보(우클릭) ----------------
+    public class PlayerInfo
+    {
+        public uint id;
+        public bool found;
+        public string name;
+        public int level, combatPower, attack, defense, maxHp;
+        public ushort weaponItemId;
+        public byte weaponEnhance;
+    }
+
+    public event System.Action<PlayerInfo> OnPlayerInfo;
+
+    public void SendPlayerInfoRequest(uint targetId) { SendIfReady(Protocol.MakePlayerInfoRequestPacket(targetId)); }
+
+    private void HandlePlayerInfo(byte[] packet)
+    {
+        int offset = Protocol.HeaderSize;
+        var info = new PlayerInfo();
+        info.id = Protocol.ReadUInt(packet, ref offset);
+        info.found = Protocol.ReadByte(packet, ref offset) == 1;
+        info.name = Protocol.ReadFixedString(packet, ref offset, Protocol.NameSize);
+        info.level = Protocol.ReadInt(packet, ref offset);
+        info.combatPower = Protocol.ReadInt(packet, ref offset);
+        info.attack = Protocol.ReadInt(packet, ref offset);
+        info.defense = Protocol.ReadInt(packet, ref offset);
+        info.maxHp = Protocol.ReadInt(packet, ref offset);
+        info.weaponItemId = Protocol.ReadUShort(packet, ref offset);
+        info.weaponEnhance = Protocol.ReadByte(packet, ref offset);
+        mainThreadActions.Enqueue(() => OnPlayerInfo?.Invoke(info));
+    }
+
     private void HandleTradeInvite(byte[] packet)
     {
         int offset = Protocol.HeaderSize;
@@ -910,6 +942,9 @@ public class NetworkClient : MonoBehaviour
                 break;
             case Protocol.PacketType.SC_TRADE_CLOSED:
                 HandleTradeClosed(packet);
+                break;
+            case Protocol.PacketType.SC_PLAYER_INFO:
+                HandlePlayerInfo(packet);
                 break;
             default:
                 mainThreadActions.Enqueue(() => Debug.LogWarning("[NETWORK] Unknown packet type: " + packetType));

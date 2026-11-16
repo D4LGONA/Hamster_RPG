@@ -171,6 +171,7 @@ public partial class GameHUD : MonoBehaviour
         UpdateRaidPanel(net);
         UpdateRankingToggle(net);
         UpdateTrade(net);
+        UpdatePlayerInfo(net);
         UpdateMinimap(net);
         UpdateToasts();
     }
@@ -217,6 +218,7 @@ public partial class GameHUD : MonoBehaviour
         BuildResultWindow(canvasRect);
         BuildRankingWindow(canvasRect);
         BuildTradeWindows(canvasRect);
+        BuildPlayerInfoCard(canvasRect);
 
         NetworkClient net = NetworkClient.Instance;
         if (net != null)
@@ -242,6 +244,7 @@ public partial class GameHUD : MonoBehaviour
             net.OnTradeOpen += OpenTrade;
             net.OnTradeUpdate += ApplyTradeUpdate;
             net.OnTradeClosed += CloseTradeWindow;
+            net.OnPlayerInfo += ShowPlayerInfo;
         }
 
         HideEmptySceneStatWindow();
