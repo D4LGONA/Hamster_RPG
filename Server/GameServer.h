@@ -80,7 +80,7 @@ private:
 
     // 2026-11-16: 1:1 거래 (GameServer_Trade.cpp)
     using TradeCloseSends = std::vector<std::pair<std::uint32_t, SC_TRADE_CLOSED_PACKET>>;
-    void ProcessTradeRequest(std::uint32_t playerId);
+    void ProcessTradeRequest(std::uint32_t playerId, const CS_TRADE_REQUEST_PACKET* packet);
     void ProcessTradeRespond(std::uint32_t playerId, const CS_TRADE_RESPOND_PACKET* packet);
     void ProcessTradeOffer(std::uint32_t playerId, const CS_TRADE_OFFER_PACKET* packet);
     void ProcessTradeConfirm(std::uint32_t playerId);

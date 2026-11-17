@@ -93,7 +93,7 @@ int GameServer::ProcessPacket(std::uint32_t playerId, const char* data, int byte
 
         case PACKET_TYPE::CS_TRADE_REQUEST:
             if (packetSize == sizeof(CS_TRADE_REQUEST_PACKET))
-                ProcessTradeRequest(playerId);
+                ProcessTradeRequest(playerId, reinterpret_cast<const CS_TRADE_REQUEST_PACKET*>(packetData));
             break;
 
         case PACKET_TYPE::CS_TRADE_RESPOND:

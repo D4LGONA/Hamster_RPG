@@ -19,7 +19,7 @@ public partial class GameHUD
 
     private void BuildPlayerInfoCard(RectTransform canvas)
     {
-        RectTransform panel = Panel(canvas, "PlayerInfoCard", panelSprite, new Vector2(1, 0.5f), new Vector2(-12, 40), new Vector2(230, 236));
+        RectTransform panel = Panel(canvas, "PlayerInfoCard", panelSprite, new Vector2(1, 0.5f), new Vector2(-12, 40), new Vector2(230, 284));
         panel.GetComponent<Image>().raycastTarget = true;
         infoCard = panel.gameObject;
 
@@ -43,10 +43,18 @@ public partial class GameHUD
         infoStats = Text(panel, "Stats", "", 14, Brown, new Vector2(0.5f, 1), new Vector2(0, -110), new Vector2(200, 60), TextAlignmentOptions.Center);
         infoStats.enableWordWrapping = true;
 
-        RectTransform weaponFrame = Panel(panel, "WeaponFrame", panelDarkSprite, new Vector2(0, 0), new Vector2(16, 16), new Vector2(48, 48));
+        RectTransform weaponFrame = Panel(panel, "WeaponFrame", panelDarkSprite, new Vector2(0, 0), new Vector2(16, 64), new Vector2(48, 48));
         infoWeaponIcon = Img(weaponFrame, "Icon", null, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(34, 34));
         infoWeaponIcon.preserveAspect = true;
-        infoWeapon = Text(panel, "Weapon", "", 14, Brown, new Vector2(0, 0), new Vector2(74, 28), new Vector2(140, 24), TextAlignmentOptions.Left);
+        infoWeapon = Text(panel, "Weapon", "", 14, Brown, new Vector2(0, 0), new Vector2(74, 76), new Vector2(140, 24), TextAlignmentOptions.Left);
+
+        // 이 햄스터에게 거래 신청(서버가 6칸 안인지, 상대가 이미 거래 중인지 확인한다)
+        SmallButton(panel, "거래 신청", new Vector2(0.5f, 0), new Vector2(0, 14), () =>
+        {
+            NetworkClient.Instance?.SendTradeRequest(infoTargetId);
+            infoCard.SetActive(false);
+            ShowToast("거래를 신청했어요", Color.white);
+        }, new Vector2(190, 38));
         infoWeapon.fontStyle = FontStyles.Bold;
 
         infoCard.SetActive(false);

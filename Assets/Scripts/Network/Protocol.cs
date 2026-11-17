@@ -304,6 +304,16 @@ public static class Protocol
         return packet;
     }
 
+    // targetId 0 = 가장 가까운 사람(G키), 아니면 정보 카드에서 고른 사람
+    public static byte[] MakeTradeRequestPacket(uint targetId)
+    {
+        byte[] packet = new byte[HeaderSize + 4];
+        int offset = 0;
+        WriteHeader(packet, ref offset, PacketType.CS_TRADE_REQUEST);
+        WriteUInt(packet, ref offset, targetId);
+        return packet;
+    }
+
     public static byte[] MakeTradeRespondPacket(bool accept)
     {
         byte[] packet = new byte[HeaderSize + 1];

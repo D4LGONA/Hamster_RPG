@@ -371,7 +371,7 @@ public class NetworkClient : MonoBehaviour
     public event System.Action<TradeOffer, TradeOffer> OnTradeUpdate;   // (내 것, 상대 것)
     public event System.Action<int> OnTradeClosed;        // 이유
 
-    public void SendTradeRequest() { SendIfReady(Protocol.MakeEmptyPacket(Protocol.PacketType.CS_TRADE_REQUEST)); }
+    public void SendTradeRequest(uint targetId = 0) { SendIfReady(Protocol.MakeTradeRequestPacket(targetId)); }
     public void SendTradeRespond(bool accept) { SendIfReady(Protocol.MakeTradeRespondPacket(accept)); }
     public void SendTradeOffer(System.Collections.Generic.IList<int> slots, int gold) { SendIfReady(Protocol.MakeTradeOfferPacket(slots, gold)); }
     public void SendTradeConfirm() { SendIfReady(Protocol.MakeEmptyPacket(Protocol.PacketType.CS_TRADE_CONFIRM)); }

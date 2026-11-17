@@ -523,7 +523,13 @@ struct SC_RANKING_PACKET
 // ==============================
 constexpr int TRADE_MAX_SLOTS = 8;   // 한 번에 올릴 수 있는 가방 칸 수
 
-struct CS_TRADE_REQUEST_PACKET { std::uint16_t size; PACKET_TYPE type; };
+struct CS_TRADE_REQUEST_PACKET
+{
+    std::uint16_t size;
+    PACKET_TYPE type;
+
+    std::uint32_t targetId;   // 0이면 가장 가까운 사람(G키), 아니면 정보 카드에서 고른 그 사람
+};
 struct CS_TRADE_CONFIRM_PACKET { std::uint16_t size; PACKET_TYPE type; };
 struct CS_TRADE_CANCEL_PACKET  { std::uint16_t size; PACKET_TYPE type; };
 
@@ -652,6 +658,7 @@ static_assert(sizeof(SC_RAID_SLAM_PACKET) == PACKET_HEADER_BYTES + 16, "SC_RAID_
 static_assert(sizeof(SC_RAID_RESULT_PACKET) == PACKET_HEADER_BYTES + 19, "SC_RAID_RESULT 크기 불일치");
 static_assert(sizeof(SC_RANKING_PACKET) == PACKET_HEADER_BYTES + 2 + RANKING_COUNT * 28 * 2, "SC_RANKING 크기 불일치");
 static_assert(sizeof(SC_TRADE_INVITE_PACKET) == PACKET_HEADER_BYTES + 4 + NAME_SIZE, "SC_TRADE_INVITE 크기 불일치");
+static_assert(sizeof(CS_TRADE_REQUEST_PACKET) == PACKET_HEADER_BYTES + 4, "CS_TRADE_REQUEST 크기 불일치");
 static_assert(sizeof(CS_TRADE_RESPOND_PACKET) == PACKET_HEADER_BYTES + 1, "CS_TRADE_RESPOND 크기 불일치");
 static_assert(sizeof(SC_TRADE_OPEN_PACKET) == PACKET_HEADER_BYTES + 4 + NAME_SIZE, "SC_TRADE_OPEN 크기 불일치");
 static_assert(sizeof(CS_TRADE_OFFER_PACKET) == PACKET_HEADER_BYTES + 1 + TRADE_MAX_SLOTS + 4, "CS_TRADE_OFFER 크기 불일치");

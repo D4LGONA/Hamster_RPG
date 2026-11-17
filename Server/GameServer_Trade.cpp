@@ -120,7 +120,7 @@ void GameServer::FillTradeUpdate(std::uint32_t tradeId, std::uint32_t viewerId, 
     }
 }
 
-void GameServer::ProcessTradeRequest(std::uint32_t playerId)
+void GameServer::ProcessTradeRequest(std::uint32_t playerId, const CS_TRADE_REQUEST_PACKET* packet)
 {
     TradeCloseSends fails;
     bool invited = false;
@@ -142,6 +142,25 @@ void GameServer::ProcessTradeRequest(std::uint32_t playerId)
         if (me.GetTradeId() != 0 || me.GetZoneId() != 0)
         {
             fails.emplace_back(playerId, MakeClosed(6));
+        }
+        else if (packet->targetId != 0)
+        {
+            // 정보 카드에서 고른 사람. 같은 월드에 있고, 거래가 유지되는 거리(6칸) 안이어야 한다.
+            auto other = players.find(packet->targetId);
+
+            if (other == players.end() || packet->targetId == playerId || other->second.GetZoneId() != 0 ||
+                WithinRadius(me.GetX(), me.GetY(), other->second.GetX(), other->second.GetY(), TRADE_KEEP_RANGE) == false)
+            {
+                fails.emplace_back(playerId, MakeClosed(7));   // 더 가까이
+            }
+            else if (other->second.GetTradeId() != 0)
+            {
+                fails.emplace_back(playerId, MakeClosed(8));   // 상대가 이미 거래 중
+            }
+            else
+            {
+                targetId = packet->targetId;
+            }
         }
         else
         {
@@ -179,7 +198,10 @@ void GameServer::ProcessTradeRequest(std::uint32_t playerId)
             {
                 fails.emplace_back(playerId, MakeClosed(6));
             }
-            else
+        }
+
+        if (targetId != 0)
+        {
             {
                 const std::uint32_t tradeId = nextTradeId++;
                 TradeSession session;

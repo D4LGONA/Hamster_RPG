@@ -251,6 +251,8 @@ public partial class GameHUD
             case 4: ShowToast("가방이 꽉 차서 교환할 수 없어요", new Color32(255, 160, 160, 255)); break;
             case 5: ShowToast("거래 신청이 거절/만료됐어요", Color.white); break;
             case 6: ShowToast("근처에 거래할 햄스터가 없어요", Color.white); break;
+            case 7: ShowToast("조금 더 가까이 가야 해요", Color.white); break;
+            case 8: ShowToast("그 햄스터는 이미 거래 중이에요", Color.white); break;
         }
     }
 }
