@@ -420,7 +420,6 @@ private:
     };
     std::unordered_map<std::uint32_t, TradeSession> trades;
     std::uint32_t nextTradeId = 1;
-    static constexpr float TRADE_RANGE = 3.0f;          // 이만큼 가까이 있는 사람에게 신청
     static constexpr float TRADE_KEEP_RANGE = 6.0f;     // 거래 중 이보다 멀어지면 취소
     static constexpr float TRADE_INVITE_SEC = 15.0f;
 

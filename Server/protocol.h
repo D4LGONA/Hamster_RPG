@@ -94,7 +94,7 @@ enum class PACKET_TYPE : std::uint16_t
     SC_RANKING,            // 36  레벨 랭킹 + 지난 레이드 기여도
 
     // 2026-11-16: 1:1 거래
-    CS_TRADE_REQUEST,      // 37  가까이 있는 사람에게 거래 신청
+    CS_TRADE_REQUEST,      // 37  고른 사람에게 거래 신청
     SC_TRADE_INVITE,       // 38  누가 거래를 신청했다
     CS_TRADE_RESPOND,      // 39  수락 / 거절
     SC_TRADE_OPEN,         // 40  거래창 열기(양쪽)
@@ -528,7 +528,7 @@ struct CS_TRADE_REQUEST_PACKET
     std::uint16_t size;
     PACKET_TYPE type;
 
-    std::uint32_t targetId;   // 0이면 가장 가까운 사람(G키), 아니면 정보 카드에서 고른 그 사람
+    std::uint32_t targetId;   // 정보 카드에서 고른 사람
 };
 struct CS_TRADE_CONFIRM_PACKET { std::uint16_t size; PACKET_TYPE type; };
 struct CS_TRADE_CANCEL_PACKET  { std::uint16_t size; PACKET_TYPE type; };

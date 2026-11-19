@@ -1,6 +1,6 @@
 // 2026-11-16: 1:1 거래.
 //
-// 흐름: 신청(G) -> 상대 수락 -> 서로 올리기(가방 칸 최대 8개 + 해바라기씨) -> 둘 다 확인 -> 교환
+// 흐름: 신청(우클릭 정보 카드) -> 상대 수락 -> 서로 올리기(가방 칸 최대 8개 + 해바라기씨) -> 둘 다 확인 -> 교환
 //
 // 막아야 하는 것
 //  1) 바꿔치기: 상대가 확인을 누른 뒤 내가 올린 걸 바꾸면? -> 누가 무엇을 바꾸든 '양쪽' 확인을 지운다.
@@ -141,14 +141,14 @@ void GameServer::ProcessTradeRequest(std::uint32_t playerId, const CS_TRADE_REQU
 
         if (me.GetTradeId() != 0 || me.GetZoneId() != 0)
         {
-            fails.emplace_back(playerId, MakeClosed(6));
+            fails.emplace_back(playerId, MakeClosed(6));   // 내가 이미 거래 중이거나 집 안
         }
-        else if (packet->targetId != 0)
+        else
         {
             // 정보 카드에서 고른 사람. 같은 월드에 있고, 거래가 유지되는 거리(6칸) 안이어야 한다.
             auto other = players.find(packet->targetId);
 
-            if (other == players.end() || packet->targetId == playerId || other->second.GetZoneId() != 0 ||
+            if (packet->targetId == 0 || other == players.end() || packet->targetId == playerId || other->second.GetZoneId() != 0 ||
                 WithinRadius(me.GetX(), me.GetY(), other->second.GetX(), other->second.GetY(), TRADE_KEEP_RANGE) == false)
             {
                 fails.emplace_back(playerId, MakeClosed(7));   // 더 가까이
@@ -160,43 +160,6 @@ void GameServer::ProcessTradeRequest(std::uint32_t playerId, const CS_TRADE_REQU
             else
             {
                 targetId = packet->targetId;
-            }
-        }
-        else
-        {
-            // 가장 가까운 '거래 중이 아닌' 월드 플레이어(섹터 격자로 주변만)
-            std::vector<std::uint32_t> nearby;
-            sectorGrid.GatherNearby(me.GetX(), me.GetY(), nearby);
-            float best = TRADE_RANGE * TRADE_RANGE;
-
-            for (std::uint32_t id : nearby)
-            {
-                if (id == playerId || IsMonsterId(id) || IsHouseId(id))
-                {
-                    continue;
-                }
-
-                auto other = players.find(id);
-
-                if (other == players.end() || other->second.GetTradeId() != 0)
-                {
-                    continue;
-                }
-
-                float dx = other->second.GetX() - me.GetX();
-                float dy = other->second.GetY() - me.GetY();
-                float d = dx * dx + dy * dy;
-
-                if (d <= best)
-                {
-                    best = d;
-                    targetId = id;
-                }
-            }
-
-            if (targetId == 0)
-            {
-                fails.emplace_back(playerId, MakeClosed(6));
             }
         }
 

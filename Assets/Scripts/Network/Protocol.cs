@@ -304,7 +304,7 @@ public static class Protocol
         return packet;
     }
 
-    // targetId 0 = 가장 가까운 사람(G키), 아니면 정보 카드에서 고른 사람
+    // 정보 카드에서 고른 사람에게 거래 신청
     public static byte[] MakeTradeRequestPacket(uint targetId)
     {
         byte[] packet = new byte[HeaderSize + 4];

@@ -1,6 +1,6 @@
 // 2026-11-16: 1:1 거래 창
 //
-// G: 가까운(3칸 안) 다른 햄스터에게 거래 신청
+// 신청: 다른 햄스터 우클릭 -> 정보 카드 [거래 신청]
 // 거래 창: 왼쪽 = 내 가방(누르면 올리기/내리기, 최대 8칸), 오른쪽 = 상대가 올린 것
 //          해바라기씨 -100/-10/+10/+100, [확인] [취소]
 // 누가 뭘 바꾸면 양쪽 확인이 풀린다(서버가 그렇게 한다). 둘 다 확인하면 서버가 한 번에 바꿔 준다.
@@ -122,13 +122,6 @@ public partial class GameHUD
 
     private void UpdateTrade(NetworkClient net)
     {
-        bool chatting = ChatUI.Instance != null && ChatUI.Instance.IsChatting();
-
-        if (chatting == false && Input.GetKeyDown(KeyCode.G) && tradeWindow.activeSelf == false)
-        {
-            net.SendTradeRequest();
-        }
-
         if (tradeWindow.activeSelf == false)
         {
             return;
@@ -250,7 +243,7 @@ public partial class GameHUD
             case 3: ShowToast("올린 물건이 바뀌어서 취소됐어요", new Color32(255, 160, 160, 255)); break;
             case 4: ShowToast("가방이 꽉 차서 교환할 수 없어요", new Color32(255, 160, 160, 255)); break;
             case 5: ShowToast("거래 신청이 거절/만료됐어요", Color.white); break;
-            case 6: ShowToast("근처에 거래할 햄스터가 없어요", Color.white); break;
+            case 6: ShowToast("지금은 거래를 신청할 수 없어요", Color.white); break;
             case 7: ShowToast("조금 더 가까이 가야 해요", Color.white); break;
             case 8: ShowToast("그 햄스터는 이미 거래 중이에요", Color.white); break;
         }
